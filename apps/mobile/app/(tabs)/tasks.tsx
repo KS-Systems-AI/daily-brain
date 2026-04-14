@@ -24,6 +24,13 @@ interface Task {
   status: string | null
   priority: string | null
   position: number | null
+  contact_id: string | null
+  company_id: string | null
+  contact?:
+    | { id: string; first_name: string; last_name: string | null }
+    | { id: string; first_name: string; last_name: string | null }[]
+    | null
+  company?: { id: string; name: string } | { id: string; name: string }[] | null
   created_at: string
   updated_at: string
 }
@@ -43,6 +50,10 @@ function TaskRow({
   const dueDate = task.due_at ? new Date(task.due_at) : null
   const endDate = task.end_at ? new Date(task.end_at) : null
   const overdue = dueDate && !isDone && isOverdue(dueDate)
+  const contact = Array.isArray(task.contact) ? task.contact[0] : task.contact
+  const company = Array.isArray(task.company) ? task.company[0] : task.company
+  const contactName = [contact?.first_name, contact?.last_name].filter(Boolean).join(' ')
+  const linkedLabel = contactName || company?.name || null
 
   return (
     <TouchableOpacity style={styles.taskRow} onPress={onPress} activeOpacity={0.6}>
@@ -64,6 +75,14 @@ function TaskRow({
         >
           {task.title}
         </Text>
+        {linkedLabel && (
+          <View style={styles.linkedBadge}>
+            <Ionicons name="person-outline" size={10} color="#6b7280" />
+            <Text style={styles.linkedText} numberOfLines={1}>
+              {linkedLabel}
+            </Text>
+          </View>
+        )}
 
         {dueDate && (
           <View style={styles.taskMeta}>
@@ -282,6 +301,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginTop: 4,
     gap: 6,
+  },
+  linkedBadge: {
+    marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    alignSelf: 'flex-start',
+    backgroundColor: '#f9fafb',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  linkedText: {
+    fontSize: 11,
+    color: '#6b7280',
+    maxWidth: 180,
   },
   dateBadge: {
     flexDirection: 'row',

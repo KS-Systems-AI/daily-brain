@@ -1,7 +1,7 @@
 'use client'
 
 import { trpc } from '@/lib/trpc/provider'
-import { Bell, BellRing, CheckCheck, CheckSquare, Clock, AlertCircle } from 'lucide-react'
+import { Bell, BellRing, CheckCheck, CheckSquare, Clock, AlertCircle, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
 import { useCallback, useMemo, useState, useEffect } from 'react'
@@ -54,11 +54,21 @@ function useWebPushPermission() {
     }
   }, [])
   const request = useCallback(async () => {
-    if (!('Notification' in window)) return
+    if (
+      !('Notification' in window) ||
+      !window.isSecureContext ||
+      !('serviceWorker' in navigator)
+    ) {
+      return
+    }
     const result = await Notification.requestPermission()
     setPerm(result)
-    if (result === 'granted' && 'serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js')
+    if (result === 'granted') {
+      try {
+        await navigator.serviceWorker.register('/sw.js')
+      } catch {
+        // Ignore registration errors in unsupported/local environments.
+      }
     }
   }, [])
   return { perm, request }
@@ -76,6 +86,12 @@ export default function NotificationsPage() {
     },
   })
   const markAllRead = trpc.notifications.markAllRead.useMutation({
+    onSuccess: () => {
+      utils.notifications.list.invalidate()
+      utils.notifications.unreadCount.invalidate()
+    },
+  })
+  const deleteAll = trpc.notifications.deleteAll.useMutation({
     onSuccess: () => {
       utils.notifications.list.invalidate()
       utils.notifications.unreadCount.invalidate()
@@ -122,15 +138,35 @@ export default function NotificationsPage() {
             </span>
           )}
         </div>
-        {unreadCount > 0 && (
+        <div className="flex items-center gap-2">
           <button
-            onClick={() => markAllRead.mutate()}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            onClick={() => {
+              if (notifications.length === 0 || deleteAll.isPending) return
+              if (window.confirm('Alle Benachrichtigungen wirklich löschen?')) {
+                deleteAll.mutate()
+              }
+            }}
+            disabled={notifications.length === 0 || deleteAll.isPending}
+            className={cn(
+              'flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] transition-colors',
+              notifications.length === 0 || deleteAll.isPending
+                ? 'cursor-not-allowed border-border text-muted-foreground/50'
+                : 'border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-900/60 dark:text-red-400 dark:hover:bg-red-950/30',
+            )}
           >
-            <CheckCheck size={14} />
-            Alle als gelesen markieren
+            <Trash2 size={14} />
+            Alle löschen
           </button>
-        )}
+          {unreadCount > 0 && (
+            <button
+              onClick={() => markAllRead.mutate()}
+              className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <CheckCheck size={14} />
+              Alle als gelesen markieren
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Content */}

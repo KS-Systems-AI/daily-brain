@@ -27,7 +27,15 @@ export function useWebPush() {
   }, [])
 
   const subscribe = useCallback(async () => {
-    if (!VAPID_PUBLIC_KEY || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    if (typeof window === 'undefined') return false
+    const supportsPush =
+      !!VAPID_PUBLIC_KEY &&
+      window.isSecureContext &&
+      'Notification' in window &&
+      'serviceWorker' in navigator &&
+      'PushManager' in window
+
+    if (!supportsPush) {
       return false
     }
 
@@ -59,7 +67,11 @@ export function useWebPush() {
       }
       return true
     } catch (err) {
-      console.error('Web Push subscription failed:', err)
+      // Browsers/environments without a usable push backend can throw AbortError.
+      // This is non-fatal; keep the app running silently.
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return false
+      }
       return false
     }
   }, [registerToken])

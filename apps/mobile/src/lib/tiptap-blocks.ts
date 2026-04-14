@@ -15,7 +15,7 @@ interface TiptapNode {
 }
 
 let counter = 0
-function uid(): string {
+export function uid(): string {
   counter += 1
   return `blk-${Date.now()}-${counter}-${Math.random().toString(36).slice(2, 8)}`
 }
@@ -42,7 +42,10 @@ export function tiptapToBlocks(doc: TiptapNode): EditorBlock[] {
         id: uid(),
         block_type: 'heading',
         plaintext: extractText(node.content),
-        attrs: { level: node.attrs?.level ?? 1 },
+        attrs: {
+          level: node.attrs?.level ?? 1,
+          ...textMarksFromInlineNodes(node.content),
+        },
         indent: 0,
       })
     } else if (node.type === 'bulletList') {
@@ -51,7 +54,7 @@ export function tiptapToBlocks(doc: TiptapNode): EditorBlock[] {
           id: uid(),
           block_type: 'ul',
           plaintext: extractText(item.content?.[0]?.content),
-          attrs: {},
+          attrs: { ...textMarksFromInlineNodes(item.content?.[0]?.content) },
           indent: 0,
         })
       }
@@ -61,7 +64,7 @@ export function tiptapToBlocks(doc: TiptapNode): EditorBlock[] {
           id: uid(),
           block_type: 'ol',
           plaintext: extractText(item.content?.[0]?.content),
-          attrs: {},
+          attrs: { ...textMarksFromInlineNodes(item.content?.[0]?.content) },
           indent: 0,
         })
       }
@@ -71,7 +74,10 @@ export function tiptapToBlocks(doc: TiptapNode): EditorBlock[] {
           id: uid(),
           block_type: 'task_item',
           plaintext: extractText(item.content?.[0]?.content),
-          attrs: { checked: item.attrs?.checked ?? false },
+          attrs: {
+            checked: item.attrs?.checked ?? false,
+            ...textMarksFromInlineNodes(item.content?.[0]?.content),
+          },
           indent: 0,
         })
       }
@@ -81,7 +87,7 @@ export function tiptapToBlocks(doc: TiptapNode): EditorBlock[] {
           id: uid(),
           block_type: 'blockquote',
           plaintext: extractText(inner.content),
-          attrs: {},
+          attrs: { ...textMarksFromInlineNodes(inner.content) },
           indent: 0,
         })
       }
@@ -91,6 +97,14 @@ export function tiptapToBlocks(doc: TiptapNode): EditorBlock[] {
         block_type: 'code_block',
         plaintext: extractText(node.content),
         attrs: { language: node.attrs?.language ?? null },
+        indent: 0,
+      })
+    } else if (node.type === 'subNote') {
+      blocks.push({
+        id: uid(),
+        block_type: 'sub_note',
+        plaintext: (node.attrs?.title as string) ?? '',
+        attrs: { noteId: node.attrs?.noteId ?? '' },
         indent: 0,
       })
     } else if (node.type === 'horizontalRule') {
@@ -106,13 +120,46 @@ export function tiptapToBlocks(doc: TiptapNode): EditorBlock[] {
         id: uid(),
         block_type: 'unstyled',
         plaintext: extractText(node.content),
-        attrs: {},
+        attrs: { ...textMarksFromInlineNodes(node.content) },
         indent: 0,
       })
     }
   }
 
   return blocks.length > 0 ? blocks : [emptyBlock()]
+}
+
+const TEXT_MARK_TYPES = ['bold', 'italic', 'strike', 'underline'] as const
+
+function markSignature(marks?: { type: string }[]): string {
+  if (!marks?.length) return ''
+  const set = new Set<string>()
+  for (const m of marks) {
+    if ((TEXT_MARK_TYPES as readonly string[]).includes(m.type)) set.add(m.type)
+  }
+  return TEXT_MARK_TYPES.filter((t) => set.has(t)).join(',')
+}
+
+/** When all non-empty text runs share the same marks, return them for block attrs. */
+function textMarksFromInlineNodes(nodes?: TiptapNode[]): Record<string, boolean> {
+  const out: Record<string, boolean> = {}
+  if (!nodes?.length) return out
+  const sigs: string[] = []
+  for (const n of nodes) {
+    if (n.type === 'text' && n.text) {
+      sigs.push(markSignature(n.marks))
+    }
+  }
+  if (sigs.length === 0) return out
+  const first = sigs[0]
+  if (!sigs.every((s) => s === first) || !first) return out
+  for (const t of first.split(',')) {
+    if (t === 'bold') out.bold = true
+    if (t === 'italic') out.italic = true
+    if (t === 'strike') out.strike = true
+    if (t === 'underline') out.underline = true
+  }
+  return out
 }
 
 function textToInline(text: string): TiptapNode[] | undefined {
@@ -127,6 +174,26 @@ function textToInline(text: string): TiptapNode[] | undefined {
   return nodes.length > 0 ? nodes : undefined
 }
 
+function withTextMarks(
+  nodes: TiptapNode[] | undefined,
+  attrs: Record<string, unknown>,
+): TiptapNode[] | undefined {
+  if (!nodes) return undefined
+  const marks: { type: string }[] = []
+  if (attrs.bold) marks.push({ type: 'bold' })
+  if (attrs.italic) marks.push({ type: 'italic' })
+  if (attrs.strike) marks.push({ type: 'strike' })
+  if (attrs.underline) marks.push({ type: 'underline' })
+  if (marks.length === 0) return nodes
+  return nodes.map((n) =>
+    n.type === 'text' ? { ...n, marks: [...marks, ...(n.marks ?? [])] } : n,
+  )
+}
+
+function paragraphInline(block: EditorBlock) {
+  return withTextMarks(textToInline(block.plaintext), block.attrs)
+}
+
 export function blocksToTiptap(blocks: EditorBlock[]): TiptapNode {
   const content: TiptapNode[] = []
   let i = 0
@@ -138,7 +205,7 @@ export function blocksToTiptap(blocks: EditorBlock[]): TiptapNode {
       content.push({
         type: 'heading',
         attrs: { level: (block.attrs.level as number) ?? 1 },
-        content: textToInline(block.plaintext),
+        content: paragraphInline(block),
       })
       i++
       continue
@@ -149,7 +216,7 @@ export function blocksToTiptap(blocks: EditorBlock[]): TiptapNode {
       while (i < blocks.length && blocks[i].block_type === 'ul') {
         items.push({
           type: 'listItem',
-          content: [{ type: 'paragraph', content: textToInline(blocks[i].plaintext) }],
+          content: [{ type: 'paragraph', content: paragraphInline(blocks[i]) }],
         })
         i++
       }
@@ -162,7 +229,7 @@ export function blocksToTiptap(blocks: EditorBlock[]): TiptapNode {
       while (i < blocks.length && blocks[i].block_type === 'ol') {
         items.push({
           type: 'listItem',
-          content: [{ type: 'paragraph', content: textToInline(blocks[i].plaintext) }],
+          content: [{ type: 'paragraph', content: paragraphInline(blocks[i]) }],
         })
         i++
       }
@@ -176,7 +243,7 @@ export function blocksToTiptap(blocks: EditorBlock[]): TiptapNode {
         items.push({
           type: 'taskItem',
           attrs: { checked: blocks[i].attrs.checked ?? false },
-          content: [{ type: 'paragraph', content: textToInline(blocks[i].plaintext) }],
+          content: [{ type: 'paragraph', content: paragraphInline(blocks[i]) }],
         })
         i++
       }
@@ -187,7 +254,7 @@ export function blocksToTiptap(blocks: EditorBlock[]): TiptapNode {
     if (block.block_type === 'blockquote') {
       const children: TiptapNode[] = []
       while (i < blocks.length && blocks[i].block_type === 'blockquote') {
-        children.push({ type: 'paragraph', content: textToInline(blocks[i].plaintext) })
+        children.push({ type: 'paragraph', content: paragraphInline(blocks[i]) })
         i++
       }
       content.push({ type: 'blockquote', content: children })
@@ -204,6 +271,15 @@ export function blocksToTiptap(blocks: EditorBlock[]): TiptapNode {
       continue
     }
 
+    if (block.block_type === 'sub_note') {
+      content.push({
+        type: 'subNote',
+        attrs: { noteId: block.attrs.noteId, title: block.plaintext || 'Ohne Titel' },
+      })
+      i++
+      continue
+    }
+
     if (block.block_type === 'hr') {
       content.push({ type: 'horizontalRule' })
       i++
@@ -212,12 +288,27 @@ export function blocksToTiptap(blocks: EditorBlock[]): TiptapNode {
 
     content.push({
       type: 'paragraph',
-      content: textToInline(block.plaintext),
+      content: paragraphInline(block),
     })
     i++
   }
 
   return { type: 'doc', content }
+}
+
+export const TEXT_MARK_KEYS = ['bold', 'italic', 'underline', 'strike'] as const
+export type TextMarkKey = (typeof TEXT_MARK_KEYS)[number]
+
+export function blockSupportsTextMarks(blockType: string): boolean {
+  return ['unstyled', 'heading', 'ul', 'ol', 'task_item', 'blockquote'].includes(blockType)
+}
+
+export function copyTextMarks(attrs: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const k of TEXT_MARK_KEYS) {
+    if (attrs[k]) out[k] = true
+  }
+  return out
 }
 
 export function emptyBlock(type = 'unstyled'): EditorBlock {
@@ -231,6 +322,7 @@ export function emptyBlock(type = 'unstyled'): EditorBlock {
 }
 
 export const BLOCK_TYPES = [
+  { type: 'sub_note', label: 'Unternotiz', icon: 'document-text-outline' as const },
   { type: 'unstyled', label: 'Text', icon: 'text-outline' as const },
   { type: 'heading', label: 'Überschrift 1', icon: 'text-outline' as const, attrs: { level: 1 } },
   { type: 'heading', label: 'Überschrift 2', icon: 'text-outline' as const, attrs: { level: 2 } },

@@ -35,15 +35,17 @@ export const notesRouter = createTRPCRouter({
         search: z.string().optional(),
         is_archived: z.boolean().default(false),
         is_pinned: z.boolean().optional(),
+        parent_id: z.string().uuid().nullish(),
       }),
     )
     .query(async ({ ctx, input }) => {
-      const { cursor, limit, search, is_archived, is_pinned } = input
+      const { cursor, limit, search, is_archived, is_pinned, parent_id } = input
 
       const where: Prisma.NoteWhereInput = {
         workspace_id: ctx.workspaceId,
         deleted_at: null,
         is_archived,
+        parent_id: parent_id ?? null,
         ...(is_pinned !== undefined ? { is_pinned } : {}),
         ...(search
           ? {
@@ -68,9 +70,13 @@ export const notesRouter = createTRPCRouter({
           is_archived: true,
           contact_id: true,
           company_id: true,
+          contact: { select: { id: true, first_name: true, last_name: true } },
+          company: { select: { id: true, name: true } },
+          parent_id: true,
           created_at: true,
           updated_at: true,
           author: { select: { id: true, full_name: true, avatar_url: true } },
+          _count: { select: { children: true } },
         },
       })
 
@@ -92,9 +98,35 @@ export const notesRouter = createTRPCRouter({
         include: {
           blocks: { orderBy: { sort_order: 'asc' } },
           author: { select: { id: true, full_name: true, avatar_url: true } },
+          contact: { select: { id: true, first_name: true, last_name: true } },
+          company: { select: { id: true, name: true } },
+          children: {
+            where: { deleted_at: null },
+            orderBy: { position: 'asc' },
+            select: {
+              id: true,
+              title: true,
+              content_text: true,
+              updated_at: true,
+              position: true,
+              _count: { select: { children: true } },
+            },
+          },
         },
       })
       if (!note) throw new TRPCError({ code: 'NOT_FOUND' })
+
+      const breadcrumbs: { id: string; title: string | null }[] = []
+      let currentParentId = note.parent_id
+      for (let i = 0; i < 10 && currentParentId; i++) {
+        const parent = await ctx.prisma.note.findFirst({
+          where: { id: currentParentId, deleted_at: null },
+          select: { id: true, title: true, parent_id: true },
+        })
+        if (!parent) break
+        breadcrumbs.unshift({ id: parent.id, title: parent.title })
+        currentParentId = parent.parent_id
+      }
 
       const blockData: NoteBlockData[] = note.blocks.map((b) => ({
         id: b.id,
@@ -121,6 +153,7 @@ export const notesRouter = createTRPCRouter({
         ...note,
         tiptap_content: tiptapDoc,
         blocks: blockData,
+        breadcrumbs,
       }
     }),
 
@@ -131,9 +164,24 @@ export const notesRouter = createTRPCRouter({
         contact_id: z.string().uuid().optional(),
         company_id: z.string().uuid().optional(),
         deal_id: z.string().uuid().optional(),
+        parent_id: z.string().uuid().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      let position = 0
+      if (input.parent_id) {
+        const parent = await ctx.prisma.note.findFirst({
+          where: { id: input.parent_id, workspace_id: ctx.workspaceId, deleted_at: null },
+        })
+        if (!parent) throw new TRPCError({ code: 'NOT_FOUND', message: 'Parent note not found' })
+
+        const maxPos = await ctx.prisma.note.aggregate({
+          where: { parent_id: input.parent_id, deleted_at: null },
+          _max: { position: true },
+        })
+        position = (maxPos._max.position ?? -1) + 1
+      }
+
       const note = await ctx.prisma.note.create({
         data: {
           workspace_id: ctx.workspaceId!,
@@ -144,6 +192,8 @@ export const notesRouter = createTRPCRouter({
           contact_id: input.contact_id ?? null,
           company_id: input.company_id ?? null,
           deal_id: input.deal_id ?? null,
+          parent_id: input.parent_id ?? null,
+          position,
         },
       })
 
@@ -174,6 +224,7 @@ export const notesRouter = createTRPCRouter({
         is_archived: z.boolean().optional(),
         contact_id: z.string().uuid().nullish(),
         company_id: z.string().uuid().nullish(),
+        parent_id: z.string().uuid().nullish(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -182,12 +233,13 @@ export const notesRouter = createTRPCRouter({
       })
       if (!note) throw new TRPCError({ code: 'NOT_FOUND' })
 
-      const data: Prisma.NoteUpdateInput = {}
+      const data: Prisma.NoteUncheckedUpdateInput = {}
       if (input.title !== undefined) data.title = input.title
       if (input.is_pinned !== undefined) data.is_pinned = input.is_pinned
       if (input.is_archived !== undefined) data.is_archived = input.is_archived
       if (input.contact_id !== undefined) data.contact_id = input.contact_id ?? null
       if (input.company_id !== undefined) data.company_id = input.company_id ?? null
+      if (input.parent_id !== undefined) data.parent_id = input.parent_id ?? null
 
       return ctx.prisma.note.update({ where: { id: input.id }, data })
     }),
@@ -200,10 +252,44 @@ export const notesRouter = createTRPCRouter({
       })
       if (!note) throw new TRPCError({ code: 'NOT_FOUND' })
 
-      await ctx.prisma.note.update({
-        where: { id: input.id },
-        data: { deleted_at: new Date() },
+      const now = new Date()
+      const idsToDelete: string[] = [input.id]
+      let queue = [input.id]
+      while (queue.length > 0) {
+        const kids = await ctx.prisma.note.findMany({
+          where: { parent_id: { in: queue }, deleted_at: null },
+          select: { id: true },
+        })
+        const kidIds = kids.map((k) => k.id)
+        idsToDelete.push(...kidIds)
+        queue = kidIds
+      }
+
+      await ctx.prisma.note.updateMany({
+        where: { id: { in: idsToDelete } },
+        data: { deleted_at: now },
       })
+      return { success: true }
+    }),
+
+  reorderChildren: protectedProcedure
+    .input(
+      z.object({
+        parent_id: z.string().uuid(),
+        child_ids: z.array(z.string().uuid()),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const parent = await ctx.prisma.note.findFirst({
+        where: { id: input.parent_id, workspace_id: ctx.workspaceId, deleted_at: null },
+      })
+      if (!parent) throw new TRPCError({ code: 'NOT_FOUND' })
+
+      await ctx.prisma.$transaction(
+        input.child_ids.map((id, index) =>
+          ctx.prisma.note.update({ where: { id }, data: { position: index } }),
+        ),
+      )
       return { success: true }
     }),
 

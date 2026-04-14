@@ -1,10 +1,10 @@
 import { useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '@/lib/supabase/client'
+import { supabase, createRealtimeChannelId } from '@/lib/supabase/client'
 import { useWorkspace } from '@/lib/supabase/workspace'
 
 const TASK_SELECT =
-  'id, title, description, due_at, end_at, completed_at, status, priority, position, created_at, updated_at'
+  'id, title, description, due_at, end_at, completed_at, status, priority, position, contact_id, company_id, created_at, updated_at, contact:contacts!tasks_contact_id_fkey(id,first_name,last_name), company:companies!tasks_company_id_fkey(id,name)'
 
 export function useTasks() {
   const { workspaceId } = useWorkspace()
@@ -78,6 +78,8 @@ export function useCreateTask() {
       description?: string
       due_at?: string | null
       end_at?: string | null
+      contact_id?: string | null
+      company_id?: string | null
     }) => {
       const { data, error } = await supabase
         .from('tasks')
@@ -88,6 +90,8 @@ export function useCreateTask() {
           description: input.description ?? null,
           due_at: input.due_at ?? null,
           end_at: input.end_at ?? null,
+          contact_id: input.contact_id ?? null,
+          company_id: input.company_id ?? null,
           status: 'todo',
           priority: 'none',
           position: 0,
@@ -115,6 +119,8 @@ export function useUpdateTask() {
       end_at?: string | null
       status?: string
       completed_at?: string | null
+      contact_id?: string | null
+      company_id?: string | null
     }) => {
       const { id, ...patch } = input
 
@@ -162,7 +168,7 @@ export function useTaskRealtime() {
 
   useEffect(() => {
     const channel = supabase
-      .channel('mobile-tasks-realtime')
+      .channel(createRealtimeChannelId('mobile-tasks'))
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'tasks' },
@@ -174,7 +180,7 @@ export function useTaskRealtime() {
       .subscribe()
 
     return () => {
-      supabase.removeChannel(channel)
+      void supabase.removeChannel(channel)
     }
   }, [qc])
 }

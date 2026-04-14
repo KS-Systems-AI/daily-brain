@@ -42,6 +42,8 @@ export const tasksRouter = createTRPCRouter({
           position: true,
           contact_id: true,
           company_id: true,
+          contact: { select: { id: true, first_name: true, last_name: true } },
+          company: { select: { id: true, name: true } },
           created_at: true,
           updated_at: true,
         },
@@ -102,7 +104,7 @@ export const tasksRouter = createTRPCRouter({
       })
       if (!existing) throw new TRPCError({ code: 'NOT_FOUND' })
 
-      const updateData: Prisma.TaskUpdateInput = {}
+      const updateData: Prisma.TaskUncheckedUpdateInput = {}
       if (data.title !== undefined) updateData.title = data.title
       if (data.description !== undefined) updateData.description = data.description
       if (data.due_at !== undefined) updateData.due_at = data.due_at ? new Date(data.due_at) : null
@@ -161,6 +163,10 @@ export const tasksRouter = createTRPCRouter({
           status: true,
           priority: true,
           position: true,
+          contact_id: true,
+          company_id: true,
+          contact: { select: { id: true, first_name: true, last_name: true } },
+          company: { select: { id: true, name: true } },
           created_at: true,
           updated_at: true,
         },

@@ -226,6 +226,8 @@ model Note {
   author_id        String    @db.Uuid
   is_pinned        Boolean   @default(false)
   is_archived      Boolean   @default(false)
+  parent_id        String?   @db.Uuid
+  position         Int       @default(0)
   ai_summary       String?   @db.Text
   source           String?   @db.VarChar(50)
   created_at       DateTime  @default(now()) @db.Timestamptz(6)
@@ -237,6 +239,8 @@ model Note {
   contact   Contact?    @relation(fields: [contact_id], references: [id], onDelete: Cascade)
   company   Company?    @relation(fields: [company_id], references: [id], onDelete: Cascade)
   deal      Deal?       @relation(fields: [deal_id], references: [id], onDelete: Cascade)
+  parent    Note?       @relation("NoteHierarchy", fields: [parent_id], references: [id])
+  children  Note[]      @relation("NoteHierarchy")
   blocks    NoteBlock[]
 
   @@index([workspace_id])
@@ -244,6 +248,7 @@ model Note {
   @@index([company_id])
   @@index([deal_id])
   @@index([author_id])
+  @@index([parent_id])
   @@map("notes")
 }
 

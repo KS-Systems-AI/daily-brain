@@ -70,38 +70,40 @@ export function RecordSelector({ value, onChange, placeholder = 'Person oder Fir
 
   return (
     <div ref={containerRef} className={cn('relative', className)}>
-      <button
-        type="button"
-        onClick={value ? undefined : handleOpen}
-        className={cn(
-          'flex w-full items-center gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm transition-colors',
-          !value && 'hover:border-ring/40 cursor-pointer',
-          value && 'cursor-default',
-        )}
-      >
-        {value ? (
-          <>
-            {value.type === 'contact'
-              ? <User size={14} className="shrink-0 text-blue-500" />
-              : <Building2 size={14} className="shrink-0 text-orange-500" />
-            }
-            <span className="flex-1 text-left text-[13px] text-foreground">{value.label}</span>
-            <button
-              type="button"
-              onClick={handleClear}
-              className="ml-auto rounded p-0.5 text-muted-foreground/50 hover:text-muted-foreground"
-            >
-              <X size={12} />
-            </button>
-          </>
-        ) : (
-          <>
-            <Search size={14} className="shrink-0 text-muted-foreground/40" />
-            <span className="flex-1 text-left text-[13px] text-muted-foreground/50">{placeholder}</span>
-            <ChevronDown size={14} className="shrink-0 text-muted-foreground/30" />
-          </>
-        )}
-      </button>
+      {value ? (
+        <div
+          className={cn(
+            'flex w-full items-center gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm',
+            'cursor-default',
+          )}
+        >
+          {value.type === 'contact'
+            ? <User size={14} className="shrink-0 text-blue-500" />
+            : <Building2 size={14} className="shrink-0 text-orange-500" />
+          }
+          <span className="flex-1 text-left text-[13px] text-foreground">{value.label}</span>
+          <button
+            type="button"
+            onClick={handleClear}
+            className="ml-auto rounded p-0.5 text-muted-foreground/50 hover:text-muted-foreground"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={handleOpen}
+          className={cn(
+            'flex w-full items-center gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm transition-colors',
+            'hover:border-ring/40 cursor-pointer',
+          )}
+        >
+          <Search size={14} className="shrink-0 text-muted-foreground/40" />
+          <span className="flex-1 text-left text-[13px] text-muted-foreground/50">{placeholder}</span>
+          <ChevronDown size={14} className="shrink-0 text-muted-foreground/30" />
+        </button>
+      )}
 
       {open && (
         <div className="absolute left-0 top-full z-50 mt-1 w-full min-w-[240px] rounded-lg border border-border bg-popover shadow-lg">

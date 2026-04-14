@@ -34,6 +34,7 @@ import { trpc } from '@/lib/trpc/provider'
 import { createClient } from '@/lib/supabase/client'
 import { useTaskRealtime } from '@/hooks/use-task-realtime'
 import { useNotificationRealtime } from '@/hooks/use-notification-realtime'
+import { useNoteRealtime } from '@/hooks/use-note-realtime'
 import { useWebPush } from '@/hooks/use-web-push'
 import { CommandMenu } from './command-menu'
 import { ContactFormSheet } from '@/components/contacts/contact-form-sheet'
@@ -60,6 +61,7 @@ const recordsNav = [
 export function AppShell({ children }: { children: React.ReactNode }): React.JSX.Element {
   useTaskRealtime()
   useNotificationRealtime()
+  useNoteRealtime()
   useWebPush()
   const pathname = usePathname()
   const { data: activeTasks = [] } = trpc.tasks.list.useQuery()

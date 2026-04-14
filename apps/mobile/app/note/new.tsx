@@ -11,15 +11,21 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
 import { useCreateNote } from '@/hooks/use-notes'
+import { RecordSelector, type SelectedRecord } from '@/components/record-selector'
 
 export default function NewNoteScreen() {
   const router = useRouter()
   const [title, setTitle] = useState('')
+  const [linkedRecord, setLinkedRecord] = useState<SelectedRecord | null>(null)
   const createMutation = useCreateNote()
 
   const handleCreate = () => {
     createMutation.mutate(
-      { title: title.trim() || undefined },
+      {
+        title: title.trim() || undefined,
+        contact_id: linkedRecord?.type === 'contact' ? linkedRecord.id : null,
+        company_id: linkedRecord?.type === 'company' ? linkedRecord.id : null,
+      },
       {
         onSuccess: (data) => {
           router.replace(`/note/${data.id}`)
@@ -50,6 +56,9 @@ export default function NewNoteScreen() {
           returnKeyType="done"
           onSubmitEditing={handleCreate}
         />
+
+        <Text style={styles.label}>Verknüpft mit</Text>
+        <RecordSelector value={linkedRecord} onChange={setLinkedRecord} />
 
         <TouchableOpacity
           style={[styles.createButton, createMutation.isPending && styles.createButtonDisabled]}

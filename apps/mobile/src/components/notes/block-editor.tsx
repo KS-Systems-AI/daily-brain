@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ScrollView,
   StyleSheet,
+  type TextStyle,
   Platform,
   Keyboard,
   Dimensions,
@@ -15,27 +16,45 @@ import {
 
 const _screenHeight = Dimensions.get('window').height
 import { Ionicons } from '@expo/vector-icons'
-import { EditorToolbar } from './editor-toolbar'
+import { EditorToolbar, BlockTypeMenu } from './editor-toolbar'
 import {
   type EditorBlock,
+  type TextMarkKey,
   tiptapToBlocks,
   blocksToTiptap,
   emptyBlock,
+  uid,
+  blockSupportsTextMarks,
+  copyTextMarks,
 } from '@/lib/tiptap-blocks'
 
 interface BlockEditorProps {
   initialContent: Record<string, unknown> | null
   onSave: (tiptapJson: Record<string, unknown>, blocks: EditorBlock[]) => void
+  onSubNotePress?: (noteId: string) => void
+  onSubNoteLongPress?: (noteId: string, title: string) => void
+  onCreateSubNote?: () => Promise<{ id: string; title: string } | null>
+  childNotes?: { id: string; title: string | null }[]
 }
 
-export function BlockEditor({ initialContent, onSave }: BlockEditorProps) {
+export function BlockEditor({ initialContent, onSave, onSubNotePress, onSubNoteLongPress, onCreateSubNote, childNotes }: BlockEditorProps) {
   const [blocks, setBlocks] = useState<EditorBlock[]>(() => {
     if (initialContent) {
-      return tiptapToBlocks(initialContent as any)
+      const parsed = tiptapToBlocks(initialContent as any)
+      // Only filter when parent passed a resolved list; `undefined` = still loading,
+      // do not treat that like "no children" (empty array would remove every sub_note).
+      if (childNotes !== undefined) {
+        const validIds = new Set(childNotes.map((c) => c.id))
+        return parsed.filter(
+          (b) => b.block_type !== 'sub_note' || validIds.has(b.attrs.noteId as string),
+        )
+      }
+      return parsed
     }
     return [emptyBlock()]
   })
   const [focusedIndex, setFocusedIndex] = useState<number>(0)
+  const [showBlockMenu, setShowBlockMenu] = useState(false)
   const inputRefs = useRef<(TextInput | null)[]>([])
   const blockRowRefs = useRef<(View | null)[]>([])
   const scrollRef = useRef<ScrollView>(null)
@@ -97,7 +116,9 @@ export function BlockEditor({ initialContent, onSave }: BlockEditorProps) {
             ? currentBlock.block_type
             : 'unstyled'
 
-        const newAttrs = newType === 'task_item' ? { checked: false } : {}
+        const markAttrs = copyTextMarks(currentBlock.attrs)
+        const newAttrs =
+          newType === 'task_item' ? { checked: false, ...markAttrs } : { ...markAttrs }
 
         if (
           currentBlock.plaintext === '' &&
@@ -163,8 +184,53 @@ export function BlockEditor({ initialContent, onSave }: BlockEditorProps) {
     [focusedIndex, blocks, scheduleSave],
   )
 
+  const handleToggleTextMark = useCallback(
+    (mark: TextMarkKey) => {
+      setBlocks((prev) => {
+        const i = focusedIndex
+        if (i < 0 || i >= prev.length) return prev
+        const b = prev[i]
+        if (!blockSupportsTextMarks(b.block_type)) return prev
+        const next = [...prev]
+        const cur = !!b.attrs[mark]
+        const newAttrs = { ...b.attrs }
+        if (cur) delete newAttrs[mark]
+        else newAttrs[mark] = true
+        next[i] = { ...b, attrs: newAttrs }
+        return next
+      })
+      scheduleSave()
+    },
+    [focusedIndex, scheduleSave],
+  )
+
   const handleInsertBlock = useCallback(
-    (type: string, attrs?: Record<string, unknown>) => {
+    async (type: string, attrs?: Record<string, unknown>) => {
+      if (type === 'sub_note' && onCreateSubNote) {
+        const child = await onCreateSubNote()
+        if (!child) return
+        const newBlock: EditorBlock = {
+          id: uid(),
+          block_type: 'sub_note',
+          plaintext: child.title || 'Ohne Titel',
+          attrs: { noteId: child.id },
+          indent: 0,
+        }
+        const insertAt = focusedIndex + 1
+        if (saveTimerRef.current) {
+          clearTimeout(saveTimerRef.current)
+          saveTimerRef.current = null
+        }
+        const prev = blocksRef.current
+        const next = [...prev]
+        next.splice(insertAt, 0, newBlock)
+        blocksRef.current = next
+        setBlocks(next)
+        const tiptap = blocksToTiptap(next)
+        onSave(tiptap as unknown as Record<string, unknown>, next)
+        return
+      }
+
       const newBlock = emptyBlock(type)
       if (attrs) newBlock.attrs = attrs
       const insertAt = focusedIndex + 1
@@ -189,7 +255,7 @@ export function BlockEditor({ initialContent, onSave }: BlockEditorProps) {
       }
       scheduleSave()
     },
-    [focusedIndex, scheduleSave],
+    [focusedIndex, scheduleSave, onCreateSubNote, onSave],
   )
 
   const handleToggleCheck = useCallback(
@@ -275,6 +341,41 @@ export function BlockEditor({ initialContent, onSave }: BlockEditorProps) {
         scrollEventThrottle={16}
       >
         {blocks.map((block, index) => {
+            if (block.block_type === 'sub_note') {
+              const noteId = block.attrs.noteId as string
+              const child = childNotes?.find((c) => c.id === noteId)
+              const displayTitle = child?.title || block.plaintext || 'Ohne Titel'
+              return (
+                <View
+                  key={block.id}
+                  style={styles.subNoteCard}
+                  ref={(ref) => { blockRowRefs.current[index] = ref }}
+                >
+                  <TouchableOpacity
+                    style={styles.subNoteMainTap}
+                    activeOpacity={0.7}
+                    onPress={() => onSubNotePress?.(noteId)}
+                    onLongPress={() => onSubNoteLongPress?.(noteId, displayTitle)}
+                    delayLongPress={400}
+                  >
+                    <Ionicons name="document-text-outline" size={16} color="#6b7280" />
+                    <Text style={styles.subNoteTitle} numberOfLines={1}>{displayTitle}</Text>
+                    <Ionicons name="chevron-forward" size={14} color="#d1d5db" />
+                  </TouchableOpacity>
+                  {onSubNoteLongPress ? (
+                    <TouchableOpacity
+                      style={styles.subNoteMenuBtn}
+                      hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+                      onPress={() => onSubNoteLongPress(noteId, displayTitle)}
+                      accessibilityLabel="Unternotiz entfernen oder verschieben"
+                    >
+                      <Ionicons name="ellipsis-horizontal" size={20} color="#9ca3af" />
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              )
+            }
+
             let olNumber: number | undefined
             if (block.block_type === 'ol') {
               olNumber = 1
@@ -315,9 +416,21 @@ export function BlockEditor({ initialContent, onSave }: BlockEditorProps) {
             activeAttrs={focusedBlock?.attrs ?? {}}
             onChangeBlockType={handleChangeBlockType}
             onInsertBlock={handleInsertBlock}
+            onOpenBlockMenu={() => setShowBlockMenu(true)}
+            hasSubNotes={!!onCreateSubNote}
+            textMarksEnabled={blockSupportsTextMarks(focusedBlock?.block_type ?? '')}
+            onToggleTextMark={handleToggleTextMark}
           />
         </View>
       )}
+
+      <BlockTypeMenu
+        visible={showBlockMenu}
+        onClose={() => setShowBlockMenu(false)}
+        onChangeBlockType={handleChangeBlockType}
+        onInsertBlock={handleInsertBlock}
+        hasSubNotes={!!onCreateSubNote}
+      />
     </View>
   )
 }
@@ -352,6 +465,7 @@ function EditorBlockRow({
   }
 
   const textStyle = getTextStyle(block)
+  const markStyle = getMarkStyle(block.attrs)
   const prefix = getPrefix(block, olNumber)
 
   return (
@@ -384,6 +498,7 @@ function EditorBlockRow({
         style={[
           styles.input,
           textStyle,
+          markStyle,
           block.block_type === 'task_item' && !!block.attrs.checked && styles.checkedText,
         ]}
         value={block.plaintext}
@@ -398,6 +513,22 @@ function EditorBlockRow({
       />
     </View>
   )
+}
+
+function getMarkStyle(attrs: Record<string, unknown>): TextStyle {
+  const bold = !!attrs.bold
+  const italic = !!attrs.italic
+  const underline = !!attrs.underline
+  const strike = !!attrs.strike
+  let textDecorationLine: TextStyle['textDecorationLine']
+  if (underline && strike) textDecorationLine = 'underline line-through'
+  else if (underline) textDecorationLine = 'underline'
+  else if (strike) textDecorationLine = 'line-through'
+  return {
+    fontWeight: bold ? '700' : undefined,
+    fontStyle: italic ? 'italic' : undefined,
+    textDecorationLine,
+  }
 }
 
 function getTextStyle(block: EditorBlock) {
@@ -524,6 +655,36 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     fontStyle: 'italic',
     color: '#4b5563',
+  },
+  subNoteCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 4,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#fafafa',
+    paddingRight: 6,
+  },
+  subNoteMainTap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    minHeight: 44,
+  },
+  subNoteMenuBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    justifyContent: 'center',
+  },
+  subNoteTitle: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#111827',
   },
   hr: {
     height: 1,

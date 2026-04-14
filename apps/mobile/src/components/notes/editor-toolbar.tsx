@@ -7,14 +7,17 @@ import {
   Modal,
 } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
-import { useState } from 'react'
-import { BLOCK_TYPES } from '@/lib/tiptap-blocks'
+import { BLOCK_TYPES, type TextMarkKey } from '@/lib/tiptap-blocks'
 
 interface EditorToolbarProps {
   activeBlockType: string
   activeAttrs: Record<string, unknown>
   onChangeBlockType: (type: string, attrs?: Record<string, unknown>) => void
   onInsertBlock: (type: string, attrs?: Record<string, unknown>) => void
+  onOpenBlockMenu?: () => void
+  hasSubNotes?: boolean
+  textMarksEnabled?: boolean
+  onToggleTextMark?: (mark: TextMarkKey) => void
 }
 
 export function EditorToolbar({
@@ -22,12 +25,14 @@ export function EditorToolbar({
   activeAttrs,
   onChangeBlockType,
   onInsertBlock,
+  onOpenBlockMenu,
+  hasSubNotes,
+  textMarksEnabled,
+  onToggleTextMark,
 }: EditorToolbarProps) {
-  const [showBlockMenu, setShowBlockMenu] = useState(false)
-
   const currentLabel = getBlockLabel(activeBlockType, activeAttrs)
 
-  const toolbar = (
+  return (
     <View style={styles.toolbarOuter}>
       <View style={styles.pill}>
         <ScrollView
@@ -36,13 +41,37 @@ export function EditorToolbar({
           contentContainerStyle={styles.pillContent}
           keyboardShouldPersistTaps="always"
         >
-          <TouchableOpacity
-            style={styles.typeButton}
-            onPress={() => setShowBlockMenu(true)}
-          >
-            <Text style={styles.typeButtonText}>{currentLabel}</Text>
-            <Ionicons name="chevron-forward" size={12} color="#9ca3af" />
-          </TouchableOpacity>
+          <PillBtn
+            label={currentLabel}
+            isTypeBtn
+            onPress={onOpenBlockMenu ?? (() => {})}
+          />
+
+          {textMarksEnabled && onToggleTextMark ? (
+            <>
+              <Sep />
+              <PillBtn
+                label="B"
+                active={!!activeAttrs.bold}
+                onPress={() => onToggleTextMark('bold')}
+              />
+              <PillBtn
+                label="I"
+                active={!!activeAttrs.italic}
+                onPress={() => onToggleTextMark('italic')}
+              />
+              <PillBtn
+                label="U"
+                active={!!activeAttrs.underline}
+                onPress={() => onToggleTextMark('underline')}
+              />
+              <PillBtn
+                label="S"
+                active={!!activeAttrs.strike}
+                onPress={() => onToggleTextMark('strike')}
+              />
+            </>
+          ) : null}
 
           <Sep />
 
@@ -88,45 +117,61 @@ export function EditorToolbar({
           />
         </ScrollView>
       </View>
-
-      <Modal
-        visible={showBlockMenu}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowBlockMenu(false)}
-      >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowBlockMenu(false)}
-        >
-          <View style={styles.menuSheet}>
-            <View style={styles.menuHandle} />
-            <Text style={styles.menuTitle}>Block-Typ</Text>
-            {BLOCK_TYPES.map((bt, idx) => (
-              <TouchableOpacity
-                key={idx}
-                style={styles.menuItem}
-                onPress={() => {
-                  if (bt.type === 'hr') {
-                    onInsertBlock('hr')
-                  } else {
-                    onChangeBlockType(bt.type, 'attrs' in bt ? bt.attrs : undefined)
-                  }
-                  setShowBlockMenu(false)
-                }}
-              >
-                <Ionicons name={bt.icon} size={20} color="#374151" />
-                <Text style={styles.menuItemText}>{bt.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </TouchableOpacity>
-      </Modal>
     </View>
   )
+}
 
-  return toolbar
+interface BlockTypeMenuProps {
+  visible: boolean
+  onClose: () => void
+  onChangeBlockType: (type: string, attrs?: Record<string, unknown>) => void
+  onInsertBlock: (type: string, attrs?: Record<string, unknown>) => void
+  hasSubNotes?: boolean
+}
+
+export function BlockTypeMenu({
+  visible,
+  onClose,
+  onChangeBlockType,
+  onInsertBlock,
+  hasSubNotes,
+}: BlockTypeMenuProps) {
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+    >
+      <TouchableOpacity
+        style={styles.modalOverlay}
+        activeOpacity={1}
+        onPress={onClose}
+      >
+        <View style={styles.menuSheet} onStartShouldSetResponder={() => true}>
+          <View style={styles.menuHandle} />
+          <Text style={styles.menuTitle}>Block-Typ</Text>
+          {BLOCK_TYPES.filter((bt) => bt.type !== 'sub_note' || hasSubNotes).map((bt, idx) => (
+            <TouchableOpacity
+              key={idx}
+              style={styles.menuItem}
+              onPress={() => {
+                if (bt.type === 'hr' || bt.type === 'sub_note') {
+                  onInsertBlock(bt.type)
+                } else {
+                  onChangeBlockType(bt.type, 'attrs' in bt ? bt.attrs : undefined)
+                }
+                onClose()
+              }}
+            >
+              <Ionicons name={bt.icon} size={20} color="#374151" />
+              <Text style={styles.menuItemText}>{bt.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </TouchableOpacity>
+    </Modal>
+  )
 }
 
 function PillBtn({
@@ -134,12 +179,23 @@ function PillBtn({
   active,
   onPress,
   label,
+  isTypeBtn,
 }: {
   icon?: keyof typeof Ionicons.glyphMap
   active?: boolean
   onPress: () => void
   label?: string
+  isTypeBtn?: boolean
 }) {
+  if (isTypeBtn) {
+    return (
+      <TouchableOpacity style={styles.typeButton} onPress={onPress}>
+        <Text style={styles.typeButtonText}>{label}</Text>
+        <Ionicons name="chevron-forward" size={12} color="#9ca3af" />
+      </TouchableOpacity>
+    )
+  }
+
   return (
     <TouchableOpacity
       style={[styles.pillBtn, active && styles.pillBtnActive]}
@@ -173,7 +229,7 @@ function getBlockLabel(type: string, attrs: Record<string, unknown>): string {
 const styles = StyleSheet.create({
   toolbarOuter: {
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 2,
     backgroundColor: 'transparent',
   },
   pill: {

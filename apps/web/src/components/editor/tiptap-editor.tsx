@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -12,6 +13,7 @@ import TextAlign from '@tiptap/extension-text-align'
 import { TextStyle } from '@tiptap/extension-text-style'
 import Color from '@tiptap/extension-color'
 import { SlashCommands, SlashCommandMenu } from './slash-commands'
+import { SubNoteExtension } from './sub-note-node'
 import { cn } from '@/lib/utils'
 import {
   Bold,
@@ -24,6 +26,7 @@ import {
   Code2,
   Heading1,
   Heading2,
+  Heading3,
   Link as LinkIcon,
   Minus,
   Undo2,
@@ -35,9 +38,10 @@ interface TiptapEditorProps {
   content: Record<string, unknown>
   onChange: (content: Record<string, unknown>) => void
   placeholder?: string
+  onEditorReady?: (editor: { getJSON: () => Record<string, unknown> }) => void
 }
 
-export function TiptapEditor({ content, onChange, placeholder = 'Schreib etwas oder drücke / für Befehle...' }: TiptapEditorProps) {
+export function TiptapEditor({ content, onChange, placeholder = 'Schreib etwas oder drücke / für Befehle...', onEditorReady }: TiptapEditorProps) {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -54,6 +58,7 @@ export function TiptapEditor({ content, onChange, placeholder = 'Schreib etwas o
       TextStyle,
       Color,
       SlashCommands,
+      SubNoteExtension,
     ],
     content,
     onUpdate: ({ editor: e }) => {
@@ -66,6 +71,12 @@ export function TiptapEditor({ content, onChange, placeholder = 'Schreib etwas o
       },
     },
   })
+
+  useEffect(() => {
+    if (editor && onEditorReady) {
+      onEditorReady({ getJSON: () => editor.getJSON() as Record<string, unknown> })
+    }
+  }, [editor, onEditorReady])
 
   if (!editor) return null
 
@@ -87,6 +98,13 @@ export function TiptapEditor({ content, onChange, placeholder = 'Schreib etwas o
               title="Überschrift 2"
             >
               <Heading2 size={14} />
+            </ToolbarButton>
+            <ToolbarButton
+              active={editor.isActive('heading', { level: 3 })}
+              onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
+              title="Überschrift 3"
+            >
+              <Heading3 size={14} />
             </ToolbarButton>
           </ToolbarGroup>
 

@@ -3,7 +3,7 @@
 import { cn } from '@/lib/utils'
 import { formatRelativeDate, formatTime, formatDuration, isOverdue } from '@/lib/task-parser'
 import type { Task, TaskStatus, TaskPriority } from '@/store/task-store'
-import { Calendar, Check, Circle, Clock, Timer, Trash2, X } from 'lucide-react'
+import { Calendar, Check, Circle, Clock, Timer, Trash2, User, X } from 'lucide-react'
 
 const STATUS_CONFIG: Record<TaskStatus, { icon: typeof Circle; color: string }> = {
   todo: { icon: Circle, color: 'text-muted-foreground/50' },
@@ -43,6 +43,11 @@ export function TaskRow({
   const dueDate = task.due_at ? new Date(task.due_at) : null
   const endDate = task.end_at ? new Date(task.end_at) : null
   const overdue = dueDate && !isDone && isOverdue(dueDate)
+  const hasStartTime = !!dueDate && (dueDate.getHours() !== 0 || dueDate.getMinutes() !== 0)
+  const contactName = [task.contact?.first_name, task.contact?.last_name]
+    .filter(Boolean)
+    .join(' ')
+  const linkedLabel = contactName || task.company?.name || null
 
   return (
     <div className={cn('group flex items-center gap-3 transition-colors', compact ? 'py-2' : 'py-2.5')}>
@@ -61,6 +66,13 @@ export function TaskRow({
       </span>
 
       <div className="relative flex items-center gap-1.5">
+        {linkedLabel && (
+          <span className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
+            <User size={10} />
+            <span className="max-w-[120px] truncate">{linkedLabel}</span>
+          </span>
+        )}
+
         {!compact && priority !== 'none' && (
           <span className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5">
             <span className={cn('size-1.5 rounded-full', pc.dot)} />
@@ -92,7 +104,7 @@ export function TaskRow({
           </span>
         )}
 
-        {!compact && dueDate && endDate && (
+        {!compact && dueDate && endDate && !hasStartTime && (
           <span className="flex items-center gap-1 text-[10px] text-muted-foreground/60">
             <Timer size={9} />
             {formatDuration(dueDate, endDate)}

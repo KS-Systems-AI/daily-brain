@@ -15,18 +15,40 @@ import {
   Quote,
   Code2,
   Minus,
+  FileText,
   type LucideIcon,
 } from 'lucide-react'
 import type { Editor } from '@tiptap/react'
+import { useEditorNote } from './editor-context'
 
 interface SlashCommandItem {
   title: string
   description: string
   icon: LucideIcon
   command: (editor: Editor) => void
+  asyncCommand?: (editor: Editor, ctx: { createChildNote: () => Promise<{ id: string; title: string } | null>; saveNow: (content: Record<string, unknown>) => void }) => Promise<void>
 }
 
 const SLASH_COMMANDS: SlashCommandItem[] = [
+  {
+    title: 'Unternotiz',
+    description: 'Neue Unternotiz erstellen',
+    icon: FileText,
+    command: () => {},
+    async asyncCommand(editor, { createChildNote, saveNow }) {
+      const child = await createChildNote()
+      if (!child) return
+      editor
+        .chain()
+        .focus()
+        .insertContent({
+          type: 'subNote',
+          attrs: { noteId: child.id, title: child.title || 'Ohne Titel' },
+        })
+        .run()
+      saveNow(editor.getJSON() as Record<string, unknown>)
+    },
+  },
   {
     title: 'Überschrift 1',
     description: 'Große Überschrift',
@@ -161,12 +183,15 @@ export function SlashCommandMenu({ editor }: { editor: Editor }) {
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null)
   const [selectedIndex, setSelectedIndex] = useState(0)
   const menuRef = useRef<HTMLDivElement>(null)
+  const editorNote = useEditorNote()
 
-  const filtered = SLASH_COMMANDS.filter(
-    (cmd) =>
+  const filtered = SLASH_COMMANDS.filter((cmd) => {
+    if (cmd.asyncCommand && !editorNote.currentNoteId) return false
+    return (
       cmd.title.toLowerCase().includes(query.toLowerCase()) ||
-      cmd.description.toLowerCase().includes(query.toLowerCase()),
-  )
+      cmd.description.toLowerCase().includes(query.toLowerCase())
+    )
+  })
 
   useEffect(() => {
     const update = () => {
@@ -207,9 +232,13 @@ export function SlashCommandMenu({ editor }: { editor: Editor }) {
         }),
       )
 
-      cmd.command(editor)
+      if (cmd.asyncCommand) {
+        cmd.asyncCommand(editor, { createChildNote: editorNote.createChildNote, saveNow: editorNote.saveNow })
+      } else {
+        cmd.command(editor)
+      }
     },
-    [editor, filtered],
+    [editor, filtered, editorNote],
   )
 
   useEffect(() => {

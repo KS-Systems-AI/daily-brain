@@ -10,6 +10,8 @@ export interface Note extends BaseRecord {
   linked_event_id: string | null
   author_id: string
   is_pinned: boolean
+  parent_id: string | null
+  position: number
   ai_summary: string | null
   source: 'manual' | 'voice' | 'email' | null
 }

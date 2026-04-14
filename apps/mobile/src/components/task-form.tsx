@@ -1,7 +1,7 @@
-import { useState, useCallback, useMemo, useEffect } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
-  ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator, Alert,
+  ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator, Alert, Keyboard, Modal, Pressable,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons'
 import DateTimePicker from '@react-native-community/datetimepicker'
 import { useCreateTask, useUpdateTask, useDeleteTask } from '@/hooks/use-tasks'
 import { parseTaskInput, formatRelativeDate, formatTime } from '@/lib/task-parser'
+import { RecordSelector, type SelectedRecord } from '@/components/record-selector'
 
 function timeToMinutes(d: Date): number {
   return d.getHours() * 60 + d.getMinutes()
@@ -22,23 +23,14 @@ function minutesToDate(base: Date, mins: number): Date {
 
 function formatDurationMin(mins: number): string {
   if (mins <= 0) return ''
-  if (mins < 60) return `${mins}`
-  const h = Math.floor(mins / 60)
-  const m = mins % 60
-  return m > 0 ? `${h}h ${m}` : `${h}h`
+  return `${mins}`
 }
 
 function parseDurationText(text: string): number | null {
-  if (!text.trim()) return null
-  const hm = text.match(/(\d+)\s*h\s*(?:(\d+)\s*m(?:in)?)?/i)
-  if (hm) return parseInt(hm[1]) * 60 + (hm[2] ? parseInt(hm[2]) : 0)
-  const colon = text.match(/^(\d+):(\d{1,2})$/)
-  if (colon) return parseInt(colon[1]) * 60 + parseInt(colon[2])
-  const minOnly = text.match(/^(\d+)\s*m(?:in)?$/i)
-  if (minOnly) return parseInt(minOnly[1])
-  const num = parseInt(text)
-  if (!isNaN(num) && num > 0) return num
-  return null
+  const digits = text.replace(/\D/g, '')
+  if (!digits) return null
+  const num = parseInt(digits, 10)
+  return Number.isFinite(num) && num > 0 ? num : null
 }
 
 interface TaskData {
@@ -48,6 +40,10 @@ interface TaskData {
   due_at: string | null
   end_at: string | null
   status: string | null
+  contact_id?: string | null
+  company_id?: string | null
+  contact?: { id: string; first_name: string; last_name: string | null } | { id: string; first_name: string; last_name: string | null }[] | null
+  company?: { id: string; name: string } | { id: string; name: string }[] | null
 }
 
 type ActivePicker = 'date' | 'startTime' | 'endTime' | null
@@ -70,8 +66,15 @@ export default function TaskForm({ task }: TaskFormProps) {
   const [endTime, setEndTime] = useState<Date | null>(null)
   const [durationMin, setDurationMin] = useState<number | null>(null)
   const [durationText, setDurationText] = useState('')
+  const [isDurationFocused, setIsDurationFocused] = useState(false)
+  const [linkedRecord, setLinkedRecord] = useState<SelectedRecord | null>(null)
   const [activePicker, setActivePicker] = useState<ActivePicker>(null)
   const [initialized, setInitialized] = useState(false)
+  const pickerSnapshotRef = useRef<{
+    dueDate: Date | null
+    dueTime: Date | null
+    endTime: Date | null
+  } | null>(null)
 
   useEffect(() => {
     if (!task || initialized) return
@@ -83,6 +86,16 @@ export default function TaskForm({ task }: TaskFormProps) {
     setDueDate(due)
     if (due && (due.getHours() !== 0 || due.getMinutes() !== 0)) {
       setDueTime(due)
+    }
+    const contact = Array.isArray(task.contact) ? task.contact[0] : task.contact
+    const company = Array.isArray(task.company) ? task.company[0] : task.company
+    if (task.contact_id) {
+      const label = [contact?.first_name, contact?.last_name].filter(Boolean).join(' ') || 'Kontakt'
+      setLinkedRecord({ id: task.contact_id, type: 'contact', label })
+    } else if (task.company_id) {
+      setLinkedRecord({ id: task.company_id, type: 'company', label: company?.name || 'Unternehmen' })
+    } else {
+      setLinkedRecord(null)
     }
     if (end) {
       setEndTime(end)
@@ -161,6 +174,37 @@ export default function TaskForm({ task }: TaskFormProps) {
     }
   }, [durationText, dueTime])
 
+  const togglePicker = useCallback((picker: Exclude<ActivePicker, null>) => {
+    Keyboard.dismiss()
+    setActivePicker((prev) => {
+      const next = prev === picker ? null : picker
+      if (next) {
+        pickerSnapshotRef.current = {
+          dueDate,
+          dueTime,
+          endTime,
+        }
+      }
+      return next
+    })
+  }, [dueDate, dueTime, endTime])
+
+  const handlePickerCancel = useCallback(() => {
+    const snapshot = pickerSnapshotRef.current
+    if (snapshot) {
+      setDueDate(snapshot.dueDate)
+      setDueTime(snapshot.dueTime)
+      setEndTime(snapshot.endTime)
+    }
+    setActivePicker(null)
+    pickerSnapshotRef.current = null
+  }, [])
+
+  const handlePickerDone = useCallback(() => {
+    setActivePicker(null)
+    pickerSnapshotRef.current = null
+  }, [])
+
   const buildISODate = useCallback((): string | null => {
     if (!dueDate) return null
     const d = new Date(dueDate)
@@ -189,6 +233,8 @@ export default function TaskForm({ task }: TaskFormProps) {
           description: description.trim() || null,
           due_at: buildISODate(),
           end_at: buildEndISO(),
+          contact_id: linkedRecord?.type === 'contact' ? linkedRecord.id : null,
+          company_id: linkedRecord?.type === 'company' ? linkedRecord.id : null,
         },
         {
           onSuccess: () => router.back(),
@@ -202,6 +248,8 @@ export default function TaskForm({ task }: TaskFormProps) {
           description: description.trim() || undefined,
           due_at: buildISODate(),
           end_at: buildEndISO(),
+          contact_id: linkedRecord?.type === 'contact' ? linkedRecord.id : null,
+          company_id: linkedRecord?.type === 'company' ? linkedRecord.id : null,
         },
         {
           onSuccess: () => router.back(),
@@ -209,7 +257,7 @@ export default function TaskForm({ task }: TaskFormProps) {
         },
       )
     }
-  }, [title, description, buildISODate, buildEndISO, isEdit, task, createTask, updateTask, router])
+  }, [title, description, buildISODate, buildEndISO, linkedRecord, isEdit, task, createTask, updateTask, router])
 
   const handleDelete = useCallback(() => {
     if (!task) return
@@ -313,10 +361,16 @@ export default function TaskForm({ task }: TaskFormProps) {
 
             {/* Date */}
             <View style={styles.field}>
+              <Text style={styles.label}>Verknüpft mit</Text>
+              <RecordSelector value={linkedRecord} onChange={setLinkedRecord} />
+            </View>
+
+            {/* Date */}
+            <View style={styles.field}>
               <Text style={styles.label}>Datum</Text>
               <TouchableOpacity
                 style={styles.pickerButton}
-                onPress={() => setActivePicker(activePicker === 'date' ? null : 'date')}
+                onPress={() => togglePicker('date')}
                 activeOpacity={0.7}
               >
                 <Ionicons name="calendar-outline" size={16} color="#6b7280" />
@@ -337,7 +391,7 @@ export default function TaskForm({ task }: TaskFormProps) {
                 <Text style={styles.label}>Uhrzeit</Text>
                 <TouchableOpacity
                   style={styles.pickerButton}
-                  onPress={() => setActivePicker(activePicker === 'startTime' ? null : 'startTime')}
+                  onPress={() => togglePicker('startTime')}
                   activeOpacity={0.7}
                 >
                   <Ionicons name="time-outline" size={16} color="#6b7280" />
@@ -351,7 +405,7 @@ export default function TaskForm({ task }: TaskFormProps) {
                 <Text style={styles.label}>Endzeit</Text>
                 <TouchableOpacity
                   style={styles.pickerButton}
-                  onPress={() => setActivePicker(activePicker === 'endTime' ? null : 'endTime')}
+                  onPress={() => togglePicker('endTime')}
                   activeOpacity={0.7}
                 >
                   <Ionicons name="time-outline" size={16} color="#6b7280" />
@@ -369,14 +423,33 @@ export default function TaskForm({ task }: TaskFormProps) {
                 <TextInput
                   style={[styles.input, styles.durationInput]}
                   value={durationText}
-                  onChangeText={setDurationText}
-                  onBlur={handleDurationBlur}
-                  onSubmitEditing={handleDurationBlur}
-                  placeholder="z.B. 30, 1h, 1:30"
+                  onChangeText={(value) => setDurationText(value.replace(/\D/g, ''))}
+                  onBlur={() => {
+                    setIsDurationFocused(false)
+                    handleDurationBlur()
+                  }}
+                  onFocus={() => {
+                    setActivePicker(null)
+                    setIsDurationFocused(true)
+                  }}
+                  placeholder="z.B. 30"
                   placeholderTextColor="#9ca3af"
-                  keyboardType="default"
-                  returnKeyType="done"
+                  keyboardType="number-pad"
+                  inputMode="numeric"
                 />
+                {isDurationFocused && (
+                  <TouchableOpacity
+                    style={styles.durationApplyBtn}
+                    onPress={() => {
+                      handleDurationBlur()
+                      Keyboard.dismiss()
+                      setIsDurationFocused(false)
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="checkmark" size={16} color="#fff" />
+                  </TouchableOpacity>
+                )}
                 {durationMin && durationMin > 0 && (
                   <View style={styles.durationBadge}>
                     <Ionicons name="hourglass-outline" size={12} color="#3b82f6" />
@@ -385,25 +458,6 @@ export default function TaskForm({ task }: TaskFormProps) {
                 )}
               </View>
             </View>
-
-            {/* Inline DateTimePicker */}
-            {activePicker && (
-              <View style={styles.pickerContainer}>
-                <DateTimePicker
-                  value={pickerDate}
-                  mode={pickerMode}
-                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                  onChange={pickerOnChange}
-                  locale="de-DE"
-                  is24Hour
-                />
-                {Platform.OS === 'ios' && (
-                  <TouchableOpacity style={styles.pickerDoneBtn} onPress={() => setActivePicker(null)}>
-                    <Text style={styles.pickerDoneText}>Fertig</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            )}
 
             {/* Summary */}
             {dueDate && (
@@ -433,6 +487,40 @@ export default function TaskForm({ task }: TaskFormProps) {
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <Modal
+        visible={activePicker !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={handlePickerCancel}
+      >
+        <Pressable style={styles.pickerBackdrop} onPress={handlePickerCancel} />
+        <View style={styles.pickerSheet}>
+          <View style={styles.pickerHeader}>
+            <TouchableOpacity style={styles.pickerDoneBtn} onPress={handlePickerCancel}>
+              <Text style={styles.pickerCancelText}>Abbrechen</Text>
+            </TouchableOpacity>
+            <Text style={styles.pickerTitle}>
+              {activePicker === 'date'
+                ? 'Datum auswählen'
+                : activePicker === 'startTime'
+                  ? 'Uhrzeit auswählen'
+                  : 'Endzeit auswählen'}
+            </Text>
+            <TouchableOpacity style={styles.pickerDoneBtn} onPress={handlePickerDone}>
+              <Text style={styles.pickerDoneText}>Fertig</Text>
+            </TouchableOpacity>
+          </View>
+          <DateTimePicker
+            value={pickerDate}
+            mode={pickerMode}
+            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            onChange={pickerOnChange}
+            locale="de-DE"
+            is24Hour
+          />
+        </View>
+      </Modal>
     </SafeAreaView>
   )
 }
@@ -469,18 +557,53 @@ const styles = StyleSheet.create({
   halfField: { flex: 1 },
   durationRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   durationInput: { flex: 1 },
+  durationApplyBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#111827',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   durationBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     backgroundColor: '#eff6ff', borderRadius: 12,
     paddingHorizontal: 10, paddingVertical: 6,
   },
   durationBadgeText: { fontSize: 12, fontWeight: '500', color: '#3b82f6' },
-  pickerContainer: {
-    backgroundColor: '#f9fafb', borderRadius: 12,
-    borderWidth: 1, borderColor: '#e5e7eb', padding: 8,
+  pickerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+  },
+  pickerSheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingTop: 8,
+    paddingBottom: Platform.OS === 'ios' ? 24 : 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+  },
+  pickerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 4,
+  },
+  pickerTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  pickerCancelText: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#6b7280',
   },
   pickerDoneBtn: {
-    alignSelf: 'flex-end', paddingHorizontal: 16, paddingVertical: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
   },
   pickerDoneText: { fontSize: 15, fontWeight: '600', color: '#E8713A' },
   previewChip: {

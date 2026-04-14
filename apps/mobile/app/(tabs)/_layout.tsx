@@ -1,10 +1,12 @@
 import { Tabs } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
 import { useTaskRealtime } from '@/hooks/use-tasks'
+import { useNoteRealtime } from '@/hooks/use-notes'
 import { usePushNotifications } from '@/hooks/use-push-notifications'
 
 export default function TabLayout() {
   useTaskRealtime()
+  useNoteRealtime()
   usePushNotifications()
 
   return (

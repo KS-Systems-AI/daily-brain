@@ -218,6 +218,19 @@ export function tiptapJsonToBlocks(doc: TiptapNode): NoteBlockData[] {
       continue
     }
 
+    if (node.type === 'subNote') {
+      blocks.push({
+        id: crypto.randomUUID(),
+        block_type: 'sub_note',
+        plaintext: '',
+        styles: [],
+        sort_order: generateSortOrder(blocks.length, blocks.length + 10),
+        indent: 0,
+        attrs: { noteId: node.attrs?.noteId, title: node.attrs?.title },
+      })
+      continue
+    }
+
     const { plaintext, styles } = extractTextAndStyles(node.content)
     const attrs: Record<string, unknown> = {}
     if (node.type === 'heading') {
@@ -316,6 +329,18 @@ export function blocksToTiptapJson(blocks: NoteBlockData[]): TiptapNode {
           src: (block.attrs as Record<string, unknown>)?.src ?? '',
           alt: (block.attrs as Record<string, unknown>)?.alt ?? null,
           title: (block.attrs as Record<string, unknown>)?.title ?? null,
+        },
+      })
+      i++
+      continue
+    }
+
+    if (block.block_type === 'sub_note') {
+      content.push({
+        type: 'subNote',
+        attrs: {
+          noteId: (block.attrs as Record<string, unknown>)?.noteId ?? null,
+          title: (block.attrs as Record<string, unknown>)?.title ?? 'Ohne Titel',
         },
       })
       i++

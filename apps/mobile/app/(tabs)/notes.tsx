@@ -36,6 +36,17 @@ interface NoteItem {
   title: string | null
   content_text: string | null
   is_pinned: boolean
+  contact_id?: string | null
+  company_id?: string | null
+  children_count?: number
+  contact?:
+    | { id: string; first_name: string | null; last_name: string | null }
+    | Array<{ id: string; first_name: string | null; last_name: string | null }>
+    | null
+  company?:
+    | { id: string; name: string | null }
+    | Array<{ id: string; name: string | null }>
+    | null
   created_at: string
   updated_at: string
 }
@@ -52,30 +63,68 @@ export default function NotesScreen() {
   })
 
   const renderItem = useCallback(
-    ({ item }: { item: NoteItem }) => (
-      <TouchableOpacity
-        style={styles.noteCard}
-        activeOpacity={0.7}
-        onPress={() => router.push(`/note/${item.id}`)}
-      >
-        <View style={styles.noteHeader}>
-          <Text style={styles.noteTitle} numberOfLines={1}>
-            {item.title || 'Ohne Titel'}
-          </Text>
-          {item.is_pinned && (
-            <Ionicons name="pin" size={14} color="#E8713A" />
+    ({ item }: { item: NoteItem }) => {
+      const contact = Array.isArray(item.contact) ? item.contact[0] : item.contact
+      const company = Array.isArray(item.company) ? item.company[0] : item.company
+      const contactName = [contact?.first_name, contact?.last_name].filter(Boolean).join(' ')
+      const hasContact = Boolean(item.contact_id)
+      const hasCompany = Boolean(item.company_id)
+
+      return (
+        <TouchableOpacity
+          style={styles.noteCard}
+          activeOpacity={0.7}
+          onPress={() => router.push(`/note/${item.id}`)}
+        >
+          <View style={styles.noteHeader}>
+            <Text style={styles.noteTitle} numberOfLines={1}>
+              {item.title || 'Ohne Titel'}
+            </Text>
+            <View style={styles.noteHeaderRight}>
+              {(item.children_count ?? 0) > 0 && (
+                <View style={styles.childCountBadge}>
+                  <Ionicons name="layers-outline" size={11} color="#6b7280" />
+                  <Text style={styles.childCountText}>{item.children_count}</Text>
+                </View>
+              )}
+              {item.is_pinned && (
+                <Ionicons name="pin" size={14} color="#E8713A" />
+              )}
+            </View>
+          </View>
+          {item.content_text ? (
+            <Text style={styles.notePreview} numberOfLines={2}>
+              {item.content_text.slice(0, 80)}
+            </Text>
+          ) : null}
+
+          {(hasContact || hasCompany) && (
+            <View style={styles.linkedRow}>
+              {hasContact && (
+                <View style={[styles.linkedBadge, styles.contactBadge]}>
+                  <Ionicons name="person-outline" size={11} color="#1d4ed8" />
+                  <Text style={[styles.linkedText, styles.contactText]} numberOfLines={1}>
+                    {contactName || 'Person'}
+                  </Text>
+                </View>
+              )}
+              {hasCompany && (
+                <View style={[styles.linkedBadge, styles.companyBadge]}>
+                  <Ionicons name="business-outline" size={11} color="#c2410c" />
+                  <Text style={[styles.linkedText, styles.companyText]} numberOfLines={1}>
+                    {company?.name || 'Unternehmen'}
+                  </Text>
+                </View>
+              )}
+            </View>
           )}
-        </View>
-        {item.content_text ? (
-          <Text style={styles.notePreview} numberOfLines={2}>
-            {item.content_text.slice(0, 80)}
+
+          <Text style={styles.noteTime}>
+            {formatRelativeTime(item.updated_at)}
           </Text>
-        ) : null}
-        <Text style={styles.noteTime}>
-          {formatRelativeTime(item.updated_at)}
-        </Text>
-      </TouchableOpacity>
-    ),
+        </TouchableOpacity>
+      )
+    },
     [router],
   )
 
@@ -177,6 +226,25 @@ const styles = StyleSheet.create({
     color: '#111827',
     flex: 1,
   },
+  noteHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  childCountBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: '#f3f4f6',
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  childCountText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#6b7280',
+  },
   notePreview: {
     fontSize: 14,
     color: '#6b7280',
@@ -187,6 +255,38 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#9ca3af',
     marginTop: 6,
+  },
+  linkedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+  },
+  linkedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    maxWidth: '100%',
+  },
+  contactBadge: {
+    backgroundColor: '#eff6ff',
+  },
+  companyBadge: {
+    backgroundColor: '#fff7ed',
+  },
+  linkedText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  contactText: {
+    color: '#1d4ed8',
+  },
+  companyText: {
+    color: '#c2410c',
   },
   center: {
     flex: 1,

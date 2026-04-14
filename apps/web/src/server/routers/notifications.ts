@@ -67,6 +67,12 @@ export const notificationsRouter = createTRPCRouter({
     })
   }),
 
+  deleteAll: protectedProcedure.mutation(async ({ ctx }) => {
+    return ctx.prisma.notification.deleteMany({
+      where: { user_id: ctx.userId, workspace_id: ctx.workspaceId },
+    })
+  }),
+
   registerToken: protectedProcedure
     .input(
       z.object({

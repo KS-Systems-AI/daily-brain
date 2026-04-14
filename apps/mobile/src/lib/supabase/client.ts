@@ -23,3 +23,8 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     detectSessionInUrl: false,
   },
 })
+
+/** Unique per mount so React Strict Mode / fast remounts never reuse a subscribed channel name. */
+export function createRealtimeChannelId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
+}

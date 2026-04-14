@@ -2,7 +2,17 @@
 
 import { trpc } from '@/lib/trpc/provider'
 import { cn, formatRelativeDate } from '@/lib/utils'
-import { Plus, FileText, Pin, MoreHorizontal, Trash2, Archive } from 'lucide-react'
+import {
+  Plus,
+  FileText,
+  Pin,
+  MoreHorizontal,
+  Trash2,
+  Archive,
+  Layers,
+  User,
+  Building2,
+} from 'lucide-react'
 import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 
@@ -139,8 +149,13 @@ interface NoteItem {
   content_text: string | null
   is_pinned: boolean
   is_archived: boolean
+  contact_id?: string | null
+  company_id?: string | null
+  contact?: { id: string; first_name: string | null; last_name: string | null } | null
+  company?: { id: string; name: string | null } | null
   created_at: Date
   updated_at: Date
+  _count?: { children: number }
 }
 
 function NoteCard({
@@ -160,6 +175,9 @@ function NoteCard({
 }) {
   const router = useRouter()
   const preview = (note.content_text ?? '').slice(0, 120)
+  const contactName = [note.contact?.first_name, note.contact?.last_name].filter(Boolean).join(' ')
+  const hasContact = Boolean(note.contact_id)
+  const hasCompany = Boolean(note.company_id)
 
   return (
     <div
@@ -185,9 +203,34 @@ function NoteCard({
         {preview || 'Leere Notiz'}
       </p>
 
-      <p className="text-[11px] text-muted-foreground/40">
-        {formatRelativeDate(note.updated_at instanceof Date ? note.updated_at.toISOString() : String(note.updated_at))}
-      </p>
+      {(hasContact || hasCompany) && (
+        <div className="mb-2 flex flex-wrap items-center gap-1.5">
+          {hasContact && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
+              <User size={10} />
+              {contactName || 'Person'}
+            </span>
+          )}
+          {hasCompany && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-orange-50 px-2 py-0.5 text-[10px] font-medium text-orange-700 dark:bg-orange-950/30 dark:text-orange-300">
+              <Building2 size={10} />
+              {note.company?.name || 'Unternehmen'}
+            </span>
+          )}
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        <p className="text-[11px] text-muted-foreground/40">
+          {formatRelativeDate(note.updated_at instanceof Date ? note.updated_at.toISOString() : String(note.updated_at))}
+        </p>
+        {(note._count?.children ?? 0) > 0 && (
+          <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground/40">
+            <Layers size={9} />
+            {note._count!.children}
+          </span>
+        )}
+      </div>
 
       {note.is_pinned && (
         <Pin size={9} className="absolute right-2 top-2 text-muted-foreground/30" />

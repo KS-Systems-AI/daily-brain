@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import { trpc } from '@/lib/trpc/provider'
 import { parseTaskInput, formatRelativeDate } from '@/lib/task-parser'
 import type { Task, TaskStatus, TaskPriority } from '@/store/task-store'
@@ -97,6 +97,15 @@ export function TaskFormDialog({ open, onOpenChange, task, initialRecord }: Task
   const [formRecord, setFormRecord] = useState<SelectedRecord | null>(null)
   const [initialized, setInitialized] = useState(false)
 
+  const { data: linkedContact } = trpc.contacts.getById.useQuery(
+    { id: task?.contact_id ?? '' },
+    { enabled: open && !!task?.contact_id, refetchOnWindowFocus: false },
+  )
+  const { data: linkedCompany } = trpc.companies.getById.useQuery(
+    { id: task?.company_id ?? '' },
+    { enabled: open && !!task?.company_id, refetchOnWindowFocus: false },
+  )
+
   const isEdit = !!task
 
   if (open && !initialized) {
@@ -125,9 +134,20 @@ export function TaskFormDialog({ open, onOpenChange, task, initialRecord }: Task
       setFormStatus((task.status ?? 'todo') as TaskStatus)
       // restore linked record when editing
       if (task.contact_id) {
-        setFormRecord({ id: task.contact_id, type: 'contact', label: '' })
+        const label = [task.contact?.first_name, task.contact?.last_name]
+          .filter(Boolean)
+          .join(' ')
+        setFormRecord({
+          id: task.contact_id,
+          type: 'contact',
+          label: label || 'Kontakt',
+        })
       } else if (task.company_id) {
-        setFormRecord({ id: task.company_id, type: 'company', label: '' })
+        setFormRecord({
+          id: task.company_id,
+          type: 'company',
+          label: task.company?.name || 'Unternehmen',
+        })
       } else {
         setFormRecord(null)
       }
@@ -149,6 +169,39 @@ export function TaskFormDialog({ open, onOpenChange, task, initialRecord }: Task
   if (!open && initialized) {
     setInitialized(false)
   }
+
+  useEffect(() => {
+    if (!open || !task) return
+
+    if (task.contact_id && linkedContact) {
+      const label = [linkedContact.first_name, linkedContact.last_name]
+        .filter(Boolean)
+        .join(' ')
+      if (label) {
+        setFormRecord((prev) => {
+          if (prev?.id === task.contact_id && prev.type === 'contact' && prev.label === label) {
+            return prev
+          }
+          return { id: task.contact_id as string, type: 'contact', label }
+        })
+      }
+    } else if (task.company_id && linkedCompany?.name) {
+      setFormRecord((prev) => {
+        if (
+          prev?.id === task.company_id &&
+          prev.type === 'company' &&
+          prev.label === linkedCompany.name
+        ) {
+          return prev
+        }
+        return {
+          id: task.company_id as string,
+          type: 'company',
+          label: linkedCompany.name,
+        }
+      })
+    }
+  }, [open, task, linkedContact, linkedCompany])
 
   const parsedPreview = useMemo(() => {
     if (isEdit || !formTitle.trim()) return null

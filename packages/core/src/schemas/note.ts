@@ -9,6 +9,7 @@ export const noteCreateSchema = z.object({
   content_markdown: z.string().optional(),
   linked_event_id: z.string().optional(),
   is_pinned: z.boolean().default(false),
+  parent_id: z.string().uuid().optional(),
 })
 
 export const noteUpdateSchema = noteCreateSchema.partial()

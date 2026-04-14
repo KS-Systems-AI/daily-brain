@@ -15,4 +15,13 @@ export interface Task {
   completed_at: Date | null
   contact_id: string | null
   company_id: string | null
+  contact?: {
+    id: string
+    first_name: string
+    last_name: string | null
+  } | null
+  company?: {
+    id: string
+    name: string
+  } | null
 }
