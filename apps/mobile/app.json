@@ -1,0 +1,89 @@
+{
+  "expo": {
+    "name": "Daily Brain",
+    "slug": "daily-brain",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "dailybrain",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.dailybrain.app",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Daily Brain benötigt Zugriff auf das Mikrofon für die Spracheingabe von Aufgaben.",
+        "NSSpeechRecognitionUsageDescription": "Daily Brain nutzt die Spracherkennung, um diktierte Aufgaben in Text umzuwandeln."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.dailybrain.app",
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#ffffff"
+        }
+      ],
+      "./modules/dailybrain-intents/plugin/src/index.js",
+      "expo-speech-recognition",
+      "@bacons/apple-targets"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "build": {
+          "experimental": {
+            "ios": {
+              "appExtensions": [
+                {
+                  "bundleIdentifier": "com.dailybrain.app.widget",
+                  "targetName": "widget",
+                  "entitlements": {
+                    "com.apple.security.application-groups": [
+                      "group.com.dailybrain.app"
+                    ]
+                  }
+                },
+                {
+                  "bundleIdentifier": "com.dailybrain.app.widget",
+                  "targetName": "widget",
+                  "entitlements": {
+                    "com.apple.security.application-groups": [
+                      "group.com.dailybrain.app"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "projectId": "cef9432d-81de-47dc-905c-65b5ac90a195"
+      },
+      "router": {}
+    },
+    "owner": "kesc2803"
+  }
+}

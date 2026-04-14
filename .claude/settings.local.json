@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm db:migrate)",
+      "Bash(pg_isready -d \"postgresql://postgres.jdgolotkssanvzwflxej:HgM9fhipO9TwXuXx@aws-0-eu-central-1.pooler.supabase.com:6543/postgres\")",
+      "Bash(pg_isready -d \"postgresql://postgres.jdgolotkssanvzwflxej:HgM9fhipO9TwXuXx@aws-0-eu-central-1.pooler.supabase.com:5432/postgres\")"
+    ]
+  }
+}

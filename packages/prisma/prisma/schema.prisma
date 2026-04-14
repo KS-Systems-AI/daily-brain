@@ -1,0 +1,599 @@
+// Daily Brain — Prisma Schema
+// Supabase PostgreSQL + Prisma ORM
+// Schema-as-source-of-truth
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider          = "postgresql"
+  url               = env("DATABASE_URL")
+  directUrl         = env("DIRECT_URL")
+  extensions        = [pgcrypto, pg_trgm]
+}
+
+// ─────────────────────────────────────────────────
+// WORKSPACE & USERS
+// ─────────────────────────────────────────────────
+
+model Workspace {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name       String    @db.VarChar(200)
+  slug       String    @unique @db.VarChar(100)
+  logo_url   String?   @db.Text
+  plan       String    @default("free") @db.VarChar(50)
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at DateTime? @db.Timestamptz(6)
+
+  members       WorkspaceMember[]
+  contacts      Contact[]
+  companies     Company[]
+  deals         Deal[]
+  pipelines     Pipeline[]
+  notes         Note[]
+  tasks         Task[]
+  activities    Activity[]
+  objects       CustomObject[]
+  records       CustomRecord[]
+  automations   Automation[]
+  emailAccounts EmailAccount[]
+  views         View[]
+  notifications Notification[]
+
+  @@map("workspaces")
+}
+
+model User {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email      String    @unique @db.VarChar(255)
+  full_name  String?   @db.VarChar(200)
+  avatar_url String?   @db.Text
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  workspaces     WorkspaceMember[]
+  authored_notes Note[]            @relation("NoteAuthor")
+  assigned_tasks Task[]            @relation("TaskAssignee")
+  authored_tasks Task[]            @relation("TaskAuthor")
+  activities     Activity[]
+  emailAccounts  EmailAccount[]
+  views          View[]
+  notifications  Notification[]
+  push_tokens    PushToken[]
+
+  @@map("users")
+}
+
+model WorkspaceMember {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  user_id      String    @db.Uuid
+  role         String    @default("member") @db.VarChar(50)
+  joined_at    DateTime  @default(now()) @db.Timestamptz(6)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at   DateTime? @db.Timestamptz(6)
+
+  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([workspace_id, user_id])
+  @@map("workspace_members")
+}
+
+// ─────────────────────────────────────────────────
+// CONTACTS & COMPANIES
+// ─────────────────────────────────────────────────
+
+model Contact {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  first_name   String    @db.VarChar(100)
+  last_name    String?   @db.VarChar(100)
+  email        String[]  @db.Text
+  phone        String[]  @db.Text
+  company_id   String?   @db.Uuid
+  avatar_url   String?   @db.Text
+  attrs        Json      @default("{}")
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at   DateTime? @db.Timestamptz(6)
+
+  workspace  Workspace  @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  company    Company?   @relation(fields: [company_id], references: [id], onDelete: SetNull)
+  deals      Deal[]
+  notes      Note[]
+  tasks      Task[]
+  activities Activity[]
+
+  @@index([workspace_id])
+  @@index([company_id])
+  @@map("contacts")
+}
+
+model Company {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  name         String    @db.VarChar(200)
+  domain       String?   @db.VarChar(200)
+  industry     String?   @db.VarChar(100)
+  size         String?   @db.VarChar(50)
+  logo_url     String?   @db.Text
+  attrs        Json      @default("{}")
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at   DateTime? @db.Timestamptz(6)
+
+  workspace  Workspace  @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  contacts   Contact[]
+  deals      Deal[]
+  notes      Note[]
+  tasks      Task[]
+  activities Activity[]
+
+  @@index([workspace_id])
+  @@map("companies")
+}
+
+// ─────────────────────────────────────────────────
+// DEALS & PIPELINES
+// ─────────────────────────────────────────────────
+
+model Pipeline {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  name         String    @db.VarChar(200)
+  is_default   Boolean   @default(false)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at   DateTime? @db.Timestamptz(6)
+
+  workspace Workspace       @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  stages    PipelineStage[]
+  deals     Deal[]
+
+  @@index([workspace_id])
+  @@map("pipelines")
+}
+
+model PipelineStage {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  pipeline_id  String    @db.Uuid
+  name         String    @db.VarChar(100)
+  position     Int
+  color        String?   @db.VarChar(20)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at   DateTime? @db.Timestamptz(6)
+
+  pipeline Pipeline @relation(fields: [pipeline_id], references: [id], onDelete: Cascade)
+
+  @@index([pipeline_id])
+  @@map("pipeline_stages")
+}
+
+model Deal {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  title        String    @db.VarChar(200)
+  value        Int?      // cents
+  currency     String    @default("USD") @db.VarChar(3)
+  stage        String    @db.VarChar(100)
+  pipeline_id  String    @db.Uuid
+  contact_id   String?   @db.Uuid
+  company_id   String?   @db.Uuid
+  owner_id     String?   @db.Uuid
+  close_date   DateTime? @db.Timestamptz(6)
+  attrs        Json      @default("{}")
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at   DateTime? @db.Timestamptz(6)
+
+  workspace  Workspace  @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  pipeline   Pipeline   @relation(fields: [pipeline_id], references: [id])
+  contact    Contact?   @relation(fields: [contact_id], references: [id], onDelete: SetNull)
+  company    Company?   @relation(fields: [company_id], references: [id], onDelete: SetNull)
+  notes      Note[]
+  tasks      Task[]
+  activities Activity[]
+
+  @@index([workspace_id])
+  @@index([pipeline_id])
+  @@map("deals")
+}
+
+// ─────────────────────────────────────────────────
+// NOTES
+// ─────────────────────────────────────────────────
+
+model Note {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id     String    @db.Uuid
+  record_type      String?   @db.VarChar(50)
+  record_id        String?   @db.Uuid
+  contact_id       String?   @db.Uuid
+  company_id       String?   @db.Uuid
+  deal_id          String?   @db.Uuid
+  title            String?   @db.VarChar(300)
+  content          Json      @default("{}")
+  content_text     String?   @db.Text
+  content_markdown String?   @db.Text
+  linked_event_id  String?   @db.Text
+  author_id        String    @db.Uuid
+  is_pinned        Boolean   @default(false)
+  is_archived      Boolean   @default(false)
+  ai_summary       String?   @db.Text
+  source           String?   @db.VarChar(50)
+  created_at       DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at       DateTime? @db.Timestamptz(6)
+
+  workspace Workspace   @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  author    User        @relation("NoteAuthor", fields: [author_id], references: [id])
+  contact   Contact?    @relation(fields: [contact_id], references: [id], onDelete: Cascade)
+  company   Company?    @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  deal      Deal?       @relation(fields: [deal_id], references: [id], onDelete: Cascade)
+  blocks    NoteBlock[]
+
+  @@index([workspace_id])
+  @@index([contact_id])
+  @@index([company_id])
+  @@index([deal_id])
+  @@index([author_id])
+  @@map("notes")
+}
+
+model NoteBlock {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  note_id      String    @db.Uuid
+  block_type   String    @default("unstyled") @db.VarChar(50)
+  plaintext    String    @default("") @db.Text
+  styles       Json      @default("[]")
+  sort_order   String    @db.VarChar(200)
+  indent       Int       @default(0)
+  attrs        Json      @default("{}")
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  note Note @relation(fields: [note_id], references: [id], onDelete: Cascade)
+
+  @@index([note_id, sort_order])
+  @@map("note_blocks")
+}
+
+// ─────────────────────────────────────────────────
+// TASKS
+// ─────────────────────────────────────────────────
+
+model Task {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  title        String    @db.VarChar(300)
+  description  String?   @db.Text
+  due_at       DateTime? @db.Timestamptz(6)
+  end_at       DateTime? @db.Timestamptz(6)
+  completed_at DateTime? @db.Timestamptz(6)
+  status       String?   @default("todo") @db.VarChar(20)
+  priority     String?   @default("none") @db.VarChar(20)
+  position     Int?      @default(0)
+  record_type  String?   @db.VarChar(50)
+  record_id    String?   @db.Uuid
+  contact_id   String?   @db.Uuid
+  company_id   String?   @db.Uuid
+  deal_id      String?   @db.Uuid
+  assignee_id  String?   @db.Uuid
+  author_id    String    @db.Uuid
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at   DateTime? @db.Timestamptz(6)
+
+  workspace     Workspace      @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  assignee      User?          @relation("TaskAssignee", fields: [assignee_id], references: [id])
+  author        User           @relation("TaskAuthor", fields: [author_id], references: [id])
+  contact       Contact?       @relation(fields: [contact_id], references: [id], onDelete: Cascade)
+  company       Company?       @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  deal          Deal?          @relation(fields: [deal_id], references: [id], onDelete: Cascade)
+  notifications Notification[]
+
+  @@index([workspace_id])
+  @@index([assignee_id])
+  @@index([contact_id])
+  @@index([company_id])
+  @@index([deal_id])
+  @@map("tasks")
+}
+
+// ─────────────────────────────────────────────────
+// NOTIFICATIONS & PUSH TOKENS
+// ─────────────────────────────────────────────────
+
+model Notification {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  user_id      String    @db.Uuid
+  task_id      String?   @db.Uuid
+  type         String    @db.VarChar(50) // 'task_due_now', 'task_due_soon'
+  title        String    @db.VarChar(300)
+  body         String?   @db.Text
+  read_at      DateTime? @db.Timestamptz(6)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+
+  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  task      Task?     @relation(fields: [task_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, read_at])
+  @@index([workspace_id])
+  @@index([task_id])
+  @@map("notifications")
+}
+
+model PushToken {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String   @db.Uuid
+  token      String   @db.Text
+  platform   String   @db.VarChar(20) // 'ios', 'android', 'web'
+  endpoint   String?  @db.Text        // web push endpoint
+  p256dh     String?  @db.Text        // web push key
+  auth       String?  @db.Text        // web push auth
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, token])
+  @@index([user_id])
+  @@map("push_tokens")
+}
+
+// ─────────────────────────────────────────────────
+// ACTIVITIES (timeline)
+// ─────────────────────────────────────────────────
+
+model Activity {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String   @db.Uuid
+  type         String   @db.VarChar(100)
+  data         Json     @default("{}")
+  record_type  String   @db.VarChar(50)
+  record_id    String   @db.Uuid
+  contact_id   String?  @db.Uuid
+  company_id   String?  @db.Uuid
+  deal_id      String?  @db.Uuid
+  actor_id     String   @db.Uuid
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at   DateTime? @db.Timestamptz(6)
+
+  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  actor     User      @relation(fields: [actor_id], references: [id])
+  contact   Contact?  @relation(fields: [contact_id], references: [id], onDelete: Cascade)
+  company   Company?  @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  deal      Deal?     @relation(fields: [deal_id], references: [id], onDelete: Cascade)
+
+  @@index([workspace_id])
+  @@index([record_type, record_id])
+  @@index([contact_id])
+  @@map("activities")
+}
+
+// ─────────────────────────────────────────────────
+// CUSTOM OBJECTS
+// ─────────────────────────────────────────────────
+
+model CustomObject {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  slug         String    @db.VarChar(100)
+  label        String    @db.VarChar(100)
+  label_plural String    @db.VarChar(100)
+  icon         String?   @db.VarChar(50)
+  description  String?   @db.Text
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at   DateTime? @db.Timestamptz(6)
+
+  workspace  Workspace   @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  attributes Attribute[]
+  records    CustomRecord[]
+
+  @@unique([workspace_id, slug])
+  @@map("objects")
+}
+
+model Attribute {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  object_slug  String    @db.VarChar(100)
+  key          String    @db.VarChar(100)
+  label        String    @db.VarChar(100)
+  type         String    @db.VarChar(50)
+  config       Json      @default("{}")
+  is_required  Boolean   @default(false)
+  position     Int       @default(0)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at   DateTime? @db.Timestamptz(6)
+
+  object CustomObject @relation(fields: [workspace_id, object_slug], references: [workspace_id, slug], onDelete: Cascade)
+
+  @@unique([workspace_id, object_slug, key])
+  @@map("attributes")
+}
+
+model CustomRecord {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  object_slug  String    @db.VarChar(100)
+  attrs        Json      @default("{}")
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at   DateTime? @db.Timestamptz(6)
+
+  workspace Workspace    @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  object    CustomObject @relation(fields: [workspace_id, object_slug], references: [workspace_id, slug], onDelete: Cascade)
+
+  @@index([workspace_id, object_slug])
+  @@map("records")
+}
+
+model Relation {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  from_type    String    @db.VarChar(100)
+  from_id      String    @db.Uuid
+  to_type      String    @db.VarChar(100)
+  to_id        String    @db.Uuid
+  label        String?   @db.VarChar(100)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at   DateTime? @db.Timestamptz(6)
+
+  @@index([workspace_id, from_type, from_id])
+  @@index([workspace_id, to_type, to_id])
+  @@map("relations")
+}
+
+// ─────────────────────────────────────────────────
+// EMAIL SYNC
+// ─────────────────────────────────────────────────
+
+model EmailAccount {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id  String    @db.Uuid
+  user_id       String    @db.Uuid
+  provider      String    @db.VarChar(50) // 'gmail' | 'outlook'
+  email         String    @db.VarChar(255)
+  access_token  String    @db.Text
+  refresh_token String    @db.Text
+  expires_at    DateTime? @db.Timestamptz(6)
+  is_active     Boolean   @default(true)
+  created_at    DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at    DateTime? @db.Timestamptz(6)
+
+  workspace Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  user      User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  threads   EmailThread[]
+
+  @@unique([workspace_id, email])
+  @@map("email_accounts")
+}
+
+model EmailThread {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id    String    @db.Uuid
+  account_id      String    @db.Uuid
+  external_id     String    @db.Text
+  subject         String    @db.Text
+  participants    Json      // string[]
+  record_id       String?   @db.Uuid
+  record_type     String?   @db.VarChar(50)
+  last_message_at DateTime  @db.Timestamptz(6)
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at      DateTime? @db.Timestamptz(6)
+
+  account  EmailAccount   @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  messages EmailMessage[]
+
+  @@unique([account_id, external_id])
+  @@index([workspace_id])
+  @@map("email_threads")
+}
+
+model EmailMessage {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String   @db.Uuid
+  thread_id   String    @db.Uuid
+  external_id String    @db.Text
+  body        String    @db.Text
+  body_text   String?   @db.Text
+  from_addr   String    @db.VarChar(255)
+  to_addrs    Json      // string[]
+  sent_at     DateTime  @db.Timestamptz(6)
+  direction   String    @db.VarChar(20) // 'inbound' | 'outbound'
+  created_at  DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at  DateTime? @db.Timestamptz(6)
+
+  thread EmailThread @relation(fields: [thread_id], references: [id], onDelete: Cascade)
+
+  @@unique([thread_id, external_id])
+  @@index([workspace_id])
+  @@map("email_messages")
+}
+
+// ─────────────────────────────────────────────────
+// AUTOMATIONS
+// ─────────────────────────────────────────────────
+
+model Automation {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  name         String    @db.VarChar(200)
+  trigger      Json      // AutomationTrigger
+  steps        Json      // AutomationStep[]
+  enabled      Boolean   @default(false)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at   DateTime? @db.Timestamptz(6)
+
+  workspace Workspace       @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  runs      AutomationRun[]
+
+  @@index([workspace_id])
+  @@map("automations")
+}
+
+model AutomationRun {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id   String    @db.Uuid
+  automation_id  String    @db.Uuid
+  status         String    @default("pending") @db.VarChar(50)
+  trigger_data   Json      @default("{}")
+  result         Json?
+  started_at     DateTime  @default(now()) @db.Timestamptz(6)
+  finished_at    DateTime? @db.Timestamptz(6)
+  error          String?   @db.Text
+  created_at     DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at     DateTime? @db.Timestamptz(6)
+
+  automation Automation @relation(fields: [automation_id], references: [id], onDelete: Cascade)
+
+  @@index([automation_id])
+  @@index([workspace_id])
+  @@map("automation_runs")
+}
+
+// ─────────────────────────────────────────────────
+// VIEWS (saved filters/sorts/columns)
+// ─────────────────────────────────────────────────
+
+model View {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  user_id      String    @db.Uuid
+  object_type  String    @db.VarChar(100)
+  name         String    @db.VarChar(200)
+  type         String    @default("table") @db.VarChar(50) // 'table' | 'kanban' | 'list'
+  filters      Json      @default("[]")
+  sorts        Json      @default("[]")
+  columns      Json      @default("[]")
+  group_by     String?   @db.VarChar(100)
+  is_default   Boolean   @default(false)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at   DateTime? @db.Timestamptz(6)
+
+  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([workspace_id, user_id, object_type])
+  @@map("views")
+}
