@@ -57,6 +57,8 @@ export const tasksRouter = createTRPCRouter({
         end_at: z.string().datetime().nullish(),
         status: z.enum(['todo', 'in_progress', 'done', 'cancelled']).default('todo'),
         priority: z.enum(['none', 'low', 'medium', 'high', 'urgent']).default('none'),
+        contact_id: z.string().uuid().nullish(),
+        company_id: z.string().uuid().nullish(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -71,6 +73,8 @@ export const tasksRouter = createTRPCRouter({
           status: input.status,
           priority: input.priority,
           position: 0,
+          contact_id: input.contact_id ?? null,
+          company_id: input.company_id ?? null,
         },
       })
     }),
@@ -87,6 +91,8 @@ export const tasksRouter = createTRPCRouter({
         priority: z.enum(['none', 'low', 'medium', 'high', 'urgent']).optional(),
         position: z.number().int().optional(),
         completed_at: z.string().datetime().nullish(),
+        contact_id: z.string().uuid().nullish(),
+        company_id: z.string().uuid().nullish(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -107,6 +113,9 @@ export const tasksRouter = createTRPCRouter({
       if (data.completed_at !== undefined) {
         updateData.completed_at = data.completed_at ? new Date(data.completed_at) : null
       }
+
+      if (data.contact_id !== undefined) updateData.contact_id = data.contact_id ?? null
+      if (data.company_id !== undefined) updateData.company_id = data.company_id ?? null
 
       if (data.status === 'done' && !data.completed_at && !existing.completed_at) {
         updateData.completed_at = new Date()

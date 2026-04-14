@@ -66,6 +66,8 @@ export const notesRouter = createTRPCRouter({
           content_text: true,
           is_pinned: true,
           is_archived: true,
+          contact_id: true,
+          company_id: true,
           created_at: true,
           updated_at: true,
           author: { select: { id: true, full_name: true, avatar_url: true } },
@@ -170,6 +172,8 @@ export const notesRouter = createTRPCRouter({
         title: z.string().max(300).optional(),
         is_pinned: z.boolean().optional(),
         is_archived: z.boolean().optional(),
+        contact_id: z.string().uuid().nullish(),
+        company_id: z.string().uuid().nullish(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -182,6 +186,8 @@ export const notesRouter = createTRPCRouter({
       if (input.title !== undefined) data.title = input.title
       if (input.is_pinned !== undefined) data.is_pinned = input.is_pinned
       if (input.is_archived !== undefined) data.is_archived = input.is_archived
+      if (input.contact_id !== undefined) data.contact_id = input.contact_id ?? null
+      if (input.company_id !== undefined) data.company_id = input.company_id ?? null
 
       return ctx.prisma.note.update({ where: { id: input.id }, data })
     }),

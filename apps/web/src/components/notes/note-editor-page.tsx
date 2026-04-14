@@ -5,6 +5,7 @@ import { TiptapEditor } from '@/components/editor/tiptap-editor'
 import { ArrowLeft, Pin, Trash2, MoreHorizontal, Loader2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { RecordSelector, type SelectedRecord } from '@/components/common/record-selector'
 
 interface NoteEditorPageProps {
   noteId: string
@@ -18,6 +19,7 @@ export function NoteEditorPage({ noteId }: NoteEditorPageProps) {
   const [title, setTitle] = useState('')
   const [showMenu, setShowMenu] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [linkedRecord, setLinkedRecord] = useState<SelectedRecord | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const titleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingContentRef = useRef<Record<string, unknown> | null>(null)
@@ -53,7 +55,13 @@ export function NoteEditorPage({ noteId }: NoteEditorPageProps) {
   updateNoteRef.current = updateNote
 
   useEffect(() => {
-    if (note) setTitle(note.title ?? '')
+    if (!note) return
+    setTitle(note.title ?? '')
+    if (note.contact_id) {
+      setLinkedRecord({ id: note.contact_id, type: 'contact', label: '' })
+    } else if (note.company_id) {
+      setLinkedRecord({ id: note.company_id, type: 'company', label: '' })
+    }
   }, [note])
 
   const handleTitleChange = useCallback(
@@ -65,6 +73,18 @@ export function NoteEditorPage({ noteId }: NoteEditorPageProps) {
         updateNoteRef.current.mutate({ id: noteId, title: value })
         pendingTitleRef.current = null
       }, AUTOSAVE_DELAY)
+    },
+    [noteId],
+  )
+
+  const handleRecordChange = useCallback(
+    (record: SelectedRecord | null) => {
+      setLinkedRecord(record)
+      updateNoteRef.current.mutate({
+        id: noteId,
+        contact_id: record?.type === 'contact' ? record.id : null,
+        company_id: record?.type === 'company' ? record.id : null,
+      })
     },
     [noteId],
   )
@@ -170,6 +190,13 @@ export function NoteEditorPage({ noteId }: NoteEditorPageProps) {
           className="w-full bg-transparent text-[22px] font-semibold text-foreground placeholder-muted-foreground/30 outline-none"
           style={{ letterSpacing: '-0.02em' }}
         />
+        <div className="mt-3">
+          <RecordSelector
+            value={linkedRecord}
+            onChange={handleRecordChange}
+            placeholder="Person oder Firma verknüpfen..."
+          />
+        </div>
       </div>
 
       <TiptapEditor

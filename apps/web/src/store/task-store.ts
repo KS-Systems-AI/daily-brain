@@ -13,4 +13,6 @@ export interface Task {
   created_at: Date
   updated_at: Date
   completed_at: Date | null
+  contact_id: string | null
+  company_id: string | null
 }

@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Calendar, Hourglass } from 'lucide-react'
+import { RecordSelector, type SelectedRecord } from '@/components/common/record-selector'
 
 function toDateVal(d: Date | null): string {
   if (!d) return ''
@@ -72,9 +73,10 @@ interface TaskFormDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   task?: Task | null
+  initialRecord?: SelectedRecord | null
 }
 
-export function TaskFormDialog({ open, onOpenChange, task }: TaskFormDialogProps) {
+export function TaskFormDialog({ open, onOpenChange, task, initialRecord }: TaskFormDialogProps) {
   const utils = trpc.useUtils()
   const createTask = trpc.tasks.create.useMutation({
     onSuccess: () => { utils.tasks.list.invalidate(); utils.tasks.completed.invalidate() },
@@ -92,6 +94,7 @@ export function TaskFormDialog({ open, onOpenChange, task }: TaskFormDialogProps
   const [formDurationText, setFormDurationText] = useState('')
   const [formPriority, setFormPriority] = useState<TaskPriority>('none')
   const [formStatus, setFormStatus] = useState<TaskStatus>('todo')
+  const [formRecord, setFormRecord] = useState<SelectedRecord | null>(null)
   const [initialized, setInitialized] = useState(false)
 
   const isEdit = !!task
@@ -120,6 +123,14 @@ export function TaskFormDialog({ open, onOpenChange, task }: TaskFormDialogProps
       }
       setFormPriority((task.priority ?? 'none') as TaskPriority)
       setFormStatus((task.status ?? 'todo') as TaskStatus)
+      // restore linked record when editing
+      if (task.contact_id) {
+        setFormRecord({ id: task.contact_id, type: 'contact', label: '' })
+      } else if (task.company_id) {
+        setFormRecord({ id: task.company_id, type: 'company', label: '' })
+      } else {
+        setFormRecord(null)
+      }
     } else {
       setFormTitle('')
       setFormDescription('')
@@ -130,6 +141,7 @@ export function TaskFormDialog({ open, onOpenChange, task }: TaskFormDialogProps
       setFormDurationText('')
       setFormPriority('none')
       setFormStatus('todo')
+      setFormRecord(initialRecord ?? null)
     }
     setInitialized(true)
   }
@@ -212,6 +224,9 @@ export function TaskFormDialog({ open, onOpenChange, task }: TaskFormDialogProps
       end_at = buildDatetime(formDate, formEndTime)
     }
 
+    const contact_id = formRecord?.type === 'contact' ? formRecord.id : null
+    const company_id = formRecord?.type === 'company' ? formRecord.id : null
+
     if (task) {
       updateTask.mutate({
         id: task.id,
@@ -222,6 +237,8 @@ export function TaskFormDialog({ open, onOpenChange, task }: TaskFormDialogProps
         priority: formPriority,
         status: formStatus,
         completed_at: formStatus === 'done' ? new Date().toISOString() : undefined,
+        contact_id,
+        company_id,
       })
     } else {
       createTask.mutate({
@@ -231,6 +248,8 @@ export function TaskFormDialog({ open, onOpenChange, task }: TaskFormDialogProps
         end_at,
         priority: formPriority,
         status: formStatus,
+        contact_id,
+        company_id,
       })
     }
     onOpenChange(false)
@@ -295,6 +314,14 @@ export function TaskFormDialog({ open, onOpenChange, task }: TaskFormDialogProps
               placeholder="Optionale Details..."
               rows={2}
               className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <Label>Verknüpft mit</Label>
+            <RecordSelector
+              value={formRecord}
+              onChange={setFormRecord}
             />
           </div>
 
