@@ -13,16 +13,3 @@ export interface Note extends BaseRecord {
   ai_summary: string | null
   source: 'manual' | 'voice' | 'email' | null
 }
-
-export type NoteCreateInput = {
-  record_type?: RecordType
-  record_id?: string
-  title?: string
-  content?: JsonValue
-  content_text?: string
-  content_markdown?: string
-  linked_event_id?: string
-  is_pinned?: boolean
-}
-
-export type NoteUpdateInput = Partial<NoteCreateInput>

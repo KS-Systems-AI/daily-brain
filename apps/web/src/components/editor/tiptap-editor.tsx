@@ -207,9 +207,7 @@ export function TiptapEditor({ content, onChange, placeholder = 'Schreib etwas o
 
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-2xl px-6 py-4">
-          {/* @ts-expect-error React 19 JSX type mismatch with Tiptap */}
           <EditorContent editor={editor} />
-          {/* @ts-expect-error React 19 portal type mismatch */}
           <SlashCommandMenu editor={editor} />
         </div>
       </div>

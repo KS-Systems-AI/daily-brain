@@ -7,10 +7,10 @@ export interface Task {
   description: string | null
   status: TaskStatus
   priority: TaskPriority
-  due_at: string | null
-  end_at: string | null
+  due_at: Date | null
+  end_at: Date | null
   position: number
-  created_at: string
-  updated_at: string
-  completed_at: string | null
+  created_at: Date
+  updated_at: Date
+  completed_at: Date | null
 }

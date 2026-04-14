@@ -10,16 +10,3 @@ export interface Task extends BaseRecord {
   assignee_id: string | null
   author_id: string
 }
-
-export type TaskCreateInput = {
-  title: string
-  description?: string
-  due_at?: string
-  record_type?: RecordType
-  record_id?: string
-  assignee_id?: string
-}
-
-export type TaskUpdateInput = Partial<TaskCreateInput> & {
-  completed_at?: string | null
-}

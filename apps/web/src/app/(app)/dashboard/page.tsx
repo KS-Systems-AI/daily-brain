@@ -29,7 +29,7 @@ const mockMeetings = [
   { id: '3', title: 'Produkt Review', time: '14:00 - 15:00', color: 'bg-blue-400' },
 ]
 
-function isTodayOrOverdue(task: { due_at: string | null; status: string | null }): boolean {
+function isTodayOrOverdue(task: { due_at: Date | null; status: string | null }): boolean {
   const isDone = task.status === 'done' || task.status === 'cancelled'
   if (isDone) return false
   if (!task.due_at) return true
@@ -38,7 +38,7 @@ function isTodayOrOverdue(task: { due_at: string | null; status: string | null }
   return new Date(task.due_at) < todayEnd
 }
 
-function isOverdueOrNoDate(task: { due_at: string | null; status: string | null }): boolean {
+function isOverdueOrNoDate(task: { due_at: Date | null; status: string | null }): boolean {
   const isDone = task.status === 'done' || task.status === 'cancelled'
   if (isDone) return false
   if (!task.due_at) return true
@@ -47,7 +47,7 @@ function isOverdueOrNoDate(task: { due_at: string | null; status: string | null 
 
 export default function DashboardPage() {
   const utils = trpc.useUtils()
-  const { data: activeTasks = [] } = trpc.tasks.list.useQuery()
+  const { data: activeTasks = [] as Task[] } = trpc.tasks.list.useQuery()
   const updateTask = trpc.tasks.update.useMutation({
     onSuccess: () => { utils.tasks.list.invalidate(); utils.tasks.completed.invalidate() },
   })

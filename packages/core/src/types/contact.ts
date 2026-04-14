@@ -9,14 +9,3 @@ export interface Contact extends BaseRecord {
   avatar_url: string | null
   attrs: Record<string, JsonValue>
 }
-
-export type ContactCreateInput = {
-  first_name: string
-  last_name?: string
-  email?: string[]
-  phone?: string[]
-  company_id?: string
-  attrs?: Record<string, JsonValue>
-}
-
-export type ContactUpdateInput = Partial<ContactCreateInput>

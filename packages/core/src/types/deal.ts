@@ -14,18 +14,3 @@ export interface Deal extends BaseRecord {
   close_date: string | null
   attrs: Record<string, JsonValue>
 }
-
-export type DealCreateInput = {
-  title: string
-  pipeline_id: string
-  stage: string
-  value?: number
-  currency?: string
-  contact_id?: string
-  company_id?: string
-  owner_id?: string
-  close_date?: string
-  attrs?: Record<string, JsonValue>
-}
-
-export type DealUpdateInput = Partial<DealCreateInput>
