@@ -321,6 +321,8 @@ model Notification {
   body         String?   @db.Text
   read_at      DateTime? @db.Timestamptz(6)
   created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  /// Fälligkeitszeitpunkt der Aufgabe zum Zeitpunkt der Erinnerung (Deduplizierung pro Termin)
+  task_due_at  DateTime? @db.Timestamptz(6)
 
   workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
   user      User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
@@ -329,6 +331,7 @@ model Notification {
   @@index([user_id, read_at])
   @@index([workspace_id])
   @@index([task_id])
+  @@index([task_id, type, task_due_at])
   @@map("notifications")
 }
 

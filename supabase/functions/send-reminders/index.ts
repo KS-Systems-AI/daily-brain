@@ -12,7 +12,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 interface Task {
   id: string
   title: string
-  due_at: string
+  due_at: string | null
   workspace_id: string
   assignee_id: string | null
   author_id: string
@@ -134,12 +134,15 @@ Deno.serve(async (req) => {
     let notifCount = 0
 
     for (const task of (dueNow ?? []) as Task[]) {
-      // Skip if already notified
+      if (!task.due_at) continue
+
+      // Skip if already notified for this exact due_at (reschedule = new due_at = new reminders)
       const { count } = await supabase
         .from("notifications")
         .select("id", { count: "exact", head: true })
         .eq("task_id", task.id)
         .eq("type", "task_due_now")
+        .eq("task_due_at", task.due_at)
 
       if ((count ?? 0) > 0) continue
 
@@ -154,6 +157,7 @@ Deno.serve(async (req) => {
           type: "task_due_now",
           title: "Aufgabe fällig",
           body: task.title,
+          task_due_at: task.due_at,
         })
         .select("id")
         .single()
@@ -174,17 +178,19 @@ Deno.serve(async (req) => {
     }
 
     for (const task of (dueSoon ?? []) as Task[]) {
-      // Skip if already notified
+      if (!task.due_at) continue
+
       const { count } = await supabase
         .from("notifications")
         .select("id", { count: "exact", head: true })
         .eq("task_id", task.id)
         .eq("type", "task_due_soon")
+        .eq("task_due_at", task.due_at)
 
       if ((count ?? 0) > 0) continue
 
       const userId = task.assignee_id ?? task.author_id
-      const timeStr = task.due_at ? formatTime(new Date(task.due_at)) : ""
+      const timeStr = formatTime(new Date(task.due_at))
 
       const { data: notif } = await supabase
         .from("notifications")
@@ -195,6 +201,7 @@ Deno.serve(async (req) => {
           type: "task_due_soon",
           title: "Erinnerung: in 15 Min fällig",
           body: `${task.title}${timeStr ? ` um ${timeStr}` : ""}`,
+          task_due_at: task.due_at,
         })
         .select("id")
         .single()
