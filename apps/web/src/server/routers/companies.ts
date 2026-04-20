@@ -180,10 +180,19 @@ export const companiesRouter = createTRPCRouter({
           id: true,
           title: true,
           description: true,
+          status: true,
+          priority: true,
           due_at: true,
+          end_at: true,
           completed_at: true,
+          position: true,
           created_at: true,
+          updated_at: true,
+          contact_id: true,
+          company_id: true,
           assignee: { select: { id: true, full_name: true, avatar_url: true } },
+          contact: { select: { id: true, first_name: true, last_name: true } },
+          company: { select: { id: true, name: true } },
         },
       })
     }),
@@ -204,6 +213,67 @@ export const companiesRouter = createTRPCRouter({
         where: { id: input.taskId },
         data: { completed_at: input.completed ? new Date() : null },
       })
+    }),
+
+  getMeetings: protectedProcedure
+    .input(
+      z.object({
+        companyId: z.string().uuid(),
+        limit: z.number().int().min(1).max(50).default(20),
+        upcoming: z.boolean().default(false),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const company = await ctx.prisma.company.findFirst({
+        where: { id: input.companyId, workspace_id: ctx.workspaceId, deleted_at: null },
+      })
+      if (!company) throw new TRPCError({ code: 'NOT_FOUND' })
+
+      // Links for this company + links for all contacts belonging to this company
+      const companyContacts = await ctx.prisma.contact.findMany({
+        where: { workspace_id: ctx.workspaceId, company_id: input.companyId, deleted_at: null },
+        select: { id: true },
+      })
+      const contactIds = companyContacts.map((c) => c.id)
+
+      const links = await ctx.prisma.calendarEventLink.findMany({
+        where: {
+          workspace_id: ctx.workspaceId,
+          OR: [
+            { record_type: 'company', record_id: input.companyId },
+            ...(contactIds.length > 0
+              ? [{ record_type: 'contact' as const, record_id: { in: contactIds } }]
+              : []),
+          ],
+        },
+        select: { event_id: true },
+      })
+      const eventIds = [...new Set(links.map((l) => l.event_id))]
+      if (eventIds.length === 0) return { items: [] }
+
+      const events = await ctx.prisma.calendarEvent.findMany({
+        where: {
+          id: { in: eventIds },
+          deleted_at: null,
+          status: { not: 'cancelled' },
+          ...(input.upcoming ? { start_at: { gte: new Date() } } : {}),
+        },
+        orderBy: { start_at: input.upcoming ? 'asc' : 'desc' },
+        take: input.limit,
+        include: {
+          account: { select: { id: true, provider: true, email: true, display_name: true } },
+        },
+      })
+
+      return {
+        items: events.map((ev) => ({
+          id: ev.id, title: ev.title, description: ev.description,
+          location: ev.location, start_at: ev.start_at, end_at: ev.end_at,
+          is_all_day: ev.is_all_day, attendees: ev.attendees, status: ev.status,
+          record_type: ev.record_type, record_id: ev.record_id, created_at: ev.created_at,
+          account: ev.account,
+        })),
+      }
     }),
 
   getActivities: protectedProcedure

@@ -18,6 +18,16 @@ interface Task {
   author_id: string
 }
 
+interface CalendarEvent {
+  id: string
+  title: string
+  start_at: string
+  location: string | null
+  is_all_day: boolean
+  workspace_id: string
+  account_id: string
+}
+
 interface PushToken {
   token: string
   platform: string
@@ -216,6 +226,129 @@ Deno.serve(async (req) => {
           title: "Erinnerung: in 15 Min fällig",
           body: `${task.title}${timeStr ? ` um ${timeStr}` : ""}`,
           data: { type: "task_due_soon", taskId: task.id, notificationId: notif.id },
+        })
+      }
+      notifCount++
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // CALENDAR EVENT REMINDERS
+    // ──────────────────────────────────────────────────────────────
+
+    // Events starting NOW (within last minute)
+    const { data: eventsNow } = await supabase
+      .from("calendar_events")
+      .select("id, title, start_at, location, is_all_day, workspace_id, account_id")
+      .is("deleted_at", null)
+      .neq("status", "cancelled")
+      .eq("is_all_day", false)
+      .gte("start_at", oneMinAgo)
+      .lte("start_at", nowIso)
+
+    // Events starting in ~15 minutes
+    const { data: eventsSoon } = await supabase
+      .from("calendar_events")
+      .select("id, title, start_at, location, is_all_day, workspace_id, account_id")
+      .is("deleted_at", null)
+      .neq("status", "cancelled")
+      .eq("is_all_day", false)
+      .gte("start_at", in14Min)
+      .lte("start_at", in16Min)
+
+    for (const ev of (eventsNow ?? []) as CalendarEvent[]) {
+      const { count } = await supabase
+        .from("notifications")
+        .select("id", { count: "exact", head: true })
+        .eq("event_id", ev.id)
+        .eq("type", "event_starting")
+        .eq("event_start_at", ev.start_at)
+
+      if ((count ?? 0) > 0) continue
+
+      // Find the calendar account owner
+      const { data: account } = await supabase
+        .from("calendar_accounts")
+        .select("user_id")
+        .eq("id", ev.account_id)
+        .single()
+
+      if (!account) continue
+      const userId = account.user_id
+
+      const { data: notif } = await supabase
+        .from("notifications")
+        .insert({
+          workspace_id: ev.workspace_id,
+          user_id: userId,
+          event_id: ev.id,
+          type: "event_starting",
+          title: ev.title,
+          body: ev.location ? `Jetzt · ${ev.location}` : "Beginnt jetzt",
+          event_start_at: ev.start_at,
+        })
+        .select("id")
+        .single()
+
+      const { data: tokens } = await supabase
+        .from("push_tokens")
+        .select("token, platform, endpoint, p256dh, auth")
+        .eq("user_id", userId)
+
+      if (tokens && tokens.length > 0 && notif) {
+        await sendPushToTokens(tokens as PushToken[], {
+          title: ev.title,
+          body: ev.location ? `Jetzt · ${ev.location}` : "Beginnt jetzt",
+          data: { type: "event_starting", eventId: ev.id, notificationId: notif.id },
+        })
+      }
+      notifCount++
+    }
+
+    for (const ev of (eventsSoon ?? []) as CalendarEvent[]) {
+      const { count } = await supabase
+        .from("notifications")
+        .select("id", { count: "exact", head: true })
+        .eq("event_id", ev.id)
+        .eq("type", "event_reminder")
+        .eq("event_start_at", ev.start_at)
+
+      if ((count ?? 0) > 0) continue
+
+      const { data: account } = await supabase
+        .from("calendar_accounts")
+        .select("user_id")
+        .eq("id", ev.account_id)
+        .single()
+
+      if (!account) continue
+      const userId = account.user_id
+
+      const timeStr = formatTime(new Date(ev.start_at))
+
+      const { data: notif } = await supabase
+        .from("notifications")
+        .insert({
+          workspace_id: ev.workspace_id,
+          user_id: userId,
+          event_id: ev.id,
+          type: "event_reminder",
+          title: "In 15 Min: " + ev.title,
+          body: ev.location ? `${timeStr} · ${ev.location}` : `um ${timeStr}`,
+          event_start_at: ev.start_at,
+        })
+        .select("id")
+        .single()
+
+      const { data: tokens } = await supabase
+        .from("push_tokens")
+        .select("token, platform, endpoint, p256dh, auth")
+        .eq("user_id", userId)
+
+      if (tokens && tokens.length > 0 && notif) {
+        await sendPushToTokens(tokens as PushToken[], {
+          title: "In 15 Min: " + ev.title,
+          body: ev.location ? `${timeStr} · ${ev.location}` : `um ${timeStr}`,
+          data: { type: "event_reminder", eventId: ev.id, notificationId: notif.id },
         })
       }
       notifCount++

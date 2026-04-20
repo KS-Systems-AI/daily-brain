@@ -84,8 +84,14 @@ export function BlockEditor({ initialContent, onSave, onSubNotePress, onSubNoteL
 
   const handleTextChange = useCallback(
     (index: number, text: string) => {
-      if (text.endsWith('\n\n')) {
-        const cleanText = text.slice(0, -2)
+      const blockType = blocksRef.current[index]?.block_type
+      const isListBlock = blockType === 'ul' || blockType === 'ol' || blockType === 'task_item'
+      // Lists behave like web (Tiptap): single Enter creates a new item / exits on empty.
+      // All other blocks need a double Enter to create a new block.
+      const endsWithNewBlock = isListBlock ? text.endsWith('\n') : text.endsWith('\n\n')
+
+      if (endsWithNewBlock) {
+        const cleanText = text.slice(0, isListBlock ? -1 : -2)
         setBlocks((prev) => {
           const next = [...prev]
           next[index] = { ...next[index], plaintext: cleanText }
@@ -515,20 +521,17 @@ function EditorBlockRow({
   )
 }
 
+/** Only set keys that are active. RN merges styles so `fontWeight: undefined` would wipe heading weights. */
 function getMarkStyle(attrs: Record<string, unknown>): TextStyle {
-  const bold = !!attrs.bold
-  const italic = !!attrs.italic
+  const out: TextStyle = {}
+  if (attrs.bold) out.fontWeight = '700'
+  if (attrs.italic) out.fontStyle = 'italic'
   const underline = !!attrs.underline
   const strike = !!attrs.strike
-  let textDecorationLine: TextStyle['textDecorationLine']
-  if (underline && strike) textDecorationLine = 'underline line-through'
-  else if (underline) textDecorationLine = 'underline'
-  else if (strike) textDecorationLine = 'line-through'
-  return {
-    fontWeight: bold ? '700' : undefined,
-    fontStyle: italic ? 'italic' : undefined,
-    textDecorationLine,
-  }
+  if (underline && strike) out.textDecorationLine = 'underline line-through'
+  else if (underline) out.textDecorationLine = 'underline'
+  else if (strike) out.textDecorationLine = 'line-through'
+  return out
 }
 
 function getTextStyle(block: EditorBlock) {

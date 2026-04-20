@@ -3,6 +3,8 @@ import { TRPCError } from '@trpc/server'
 import type { Prisma } from '@prisma/client'
 import { createTRPCRouter, protectedProcedure } from '../trpc'
 import { contactCreateSchema, contactUpdateSchema } from '@daily-brain/core/schemas/contact'
+import { logActivity, ACT_CONTACT_CREATED, ACT_CONTACT_FIELD_UPDATED, FIELD_LABELS } from '../lib/activity'
+import { linkEventsToNewContact } from '../lib/calendar/sync'
 
 const listInput = z.object({
   cursor: z.string().uuid().optional(),
@@ -64,7 +66,7 @@ export const contactsRouter = createTRPCRouter({
     }),
 
   create: protectedProcedure.input(contactCreateSchema).mutation(async ({ ctx, input }) => {
-    return ctx.prisma.contact.create({
+    const contact = await ctx.prisma.contact.create({
       data: {
         workspace_id: ctx.workspaceId,
         first_name: input.first_name,
@@ -76,6 +78,24 @@ export const contactsRouter = createTRPCRouter({
       },
       include: { company: { select: { id: true, name: true } } },
     })
+
+    await logActivity({
+      prisma: ctx.prisma,
+      workspaceId: ctx.workspaceId!,
+      actorId: ctx.userId!,
+      type: ACT_CONTACT_CREATED,
+      data: {},
+      recordType: 'contact',
+      recordId: contact.id,
+      contactId: contact.id,
+    })
+
+    // Bestehende Kalender-Events rückwirkend verlinken
+    if (input.email && input.email.length > 0) {
+      linkEventsToNewContact(ctx.workspaceId, ctx.userId!, contact.id, input.email).catch(() => {})
+    }
+
+    return contact
   }),
 
   update: protectedProcedure
@@ -86,7 +106,7 @@ export const contactsRouter = createTRPCRouter({
       })
       if (!contact) throw new TRPCError({ code: 'NOT_FOUND' })
 
-      return ctx.prisma.contact.update({
+      const updated = await ctx.prisma.contact.update({
         where: { id: input.id },
         data: {
           ...input.data,
@@ -96,6 +116,66 @@ export const contactsRouter = createTRPCRouter({
         } as Prisma.ContactUpdateInput,
         include: { company: { select: { id: true, name: true } } },
       })
+
+      // Log one activity per changed top-level field
+      const changedFields = Object.keys(input.data) as (keyof typeof input.data)[]
+      for (const field of changedFields) {
+        if (field === 'attrs') {
+          // Log each changed attr key separately
+          const newAttrs = (input.data.attrs ?? {}) as Record<string, unknown>
+          const oldAttrs = (contact.attrs ?? {}) as Record<string, unknown>
+          for (const key of Object.keys(newAttrs)) {
+            const oldVal = String(oldAttrs[key] ?? '')
+            const newVal = String(newAttrs[key] ?? '')
+            if (oldVal === newVal) continue
+            await logActivity({
+              prisma: ctx.prisma,
+              workspaceId: ctx.workspaceId!,
+              actorId: ctx.userId!,
+              type: ACT_CONTACT_FIELD_UPDATED,
+              data: {
+                field: `attrs.${key}`,
+                label: FIELD_LABELS[`attrs.${key}`] ?? key,
+                oldValue: oldVal,
+                newValue: newVal,
+              },
+              recordType: 'contact',
+              recordId: input.id,
+              contactId: input.id,
+            })
+          }
+        } else {
+          const oldVal = Array.isArray(contact[field as keyof typeof contact])
+            ? (contact[field as keyof typeof contact] as string[]).join(', ')
+            : String(contact[field as keyof typeof contact] ?? '')
+          const newVal = Array.isArray(input.data[field])
+            ? (input.data[field] as string[]).join(', ')
+            : String(input.data[field] ?? '')
+          if (oldVal === newVal) continue
+          await logActivity({
+            prisma: ctx.prisma,
+            workspaceId: ctx.workspaceId!,
+            actorId: ctx.userId!,
+            type: ACT_CONTACT_FIELD_UPDATED,
+            data: {
+              field,
+              label: FIELD_LABELS[field] ?? field,
+              oldValue: oldVal,
+              newValue: newVal,
+            },
+            recordType: 'contact',
+            recordId: input.id,
+            contactId: input.id,
+          })
+        }
+      }
+
+      // Re-link calendar events if email changed
+      if (input.data.email && input.data.email.length > 0) {
+        linkEventsToNewContact(ctx.workspaceId, ctx.userId!, input.id, input.data.email).catch(() => {})
+      }
+
+      return updated
     }),
 
   delete: protectedProcedure
@@ -160,10 +240,19 @@ export const contactsRouter = createTRPCRouter({
           id: true,
           title: true,
           description: true,
+          status: true,
+          priority: true,
           due_at: true,
+          end_at: true,
           completed_at: true,
+          position: true,
           created_at: true,
+          updated_at: true,
+          contact_id: true,
+          company_id: true,
           assignee: { select: { id: true, full_name: true, avatar_url: true } },
+          contact: { select: { id: true, first_name: true, last_name: true } },
+          company: { select: { id: true, name: true } },
         },
       })
     }),
@@ -184,6 +273,56 @@ export const contactsRouter = createTRPCRouter({
         where: { id: input.taskId },
         data: { completed_at: input.completed ? new Date() : null },
       })
+    }),
+
+  getMeetings: protectedProcedure
+    .input(
+      z.object({
+        contactId: z.string().uuid(),
+        limit: z.number().int().min(1).max(50).default(20),
+        upcoming: z.boolean().default(false),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const contact = await ctx.prisma.contact.findFirst({
+        where: { id: input.contactId, workspace_id: ctx.workspaceId, deleted_at: null },
+      })
+      if (!contact) throw new TRPCError({ code: 'NOT_FOUND' })
+
+      const links = await ctx.prisma.calendarEventLink.findMany({
+        where: {
+          workspace_id: ctx.workspaceId,
+          record_type: 'contact',
+          record_id: input.contactId,
+        },
+        select: { event_id: true },
+      })
+      const eventIds = links.map((l) => l.event_id)
+      if (eventIds.length === 0) return { items: [] }
+
+      const events = await ctx.prisma.calendarEvent.findMany({
+        where: {
+          id: { in: eventIds },
+          deleted_at: null,
+          status: { not: 'cancelled' },
+          ...(input.upcoming ? { start_at: { gte: new Date() } } : {}),
+        },
+        orderBy: { start_at: input.upcoming ? 'asc' : 'desc' },
+        take: input.limit,
+        include: {
+          account: { select: { id: true, provider: true, email: true, display_name: true } },
+        },
+      })
+
+      return {
+        items: events.map((ev) => ({
+          id: ev.id, title: ev.title, description: ev.description,
+          location: ev.location, start_at: ev.start_at, end_at: ev.end_at,
+          is_all_day: ev.is_all_day, attendees: ev.attendees, status: ev.status,
+          record_type: ev.record_type, record_id: ev.record_id, created_at: ev.created_at,
+          account: ev.account,
+        })),
+      }
     }),
 
   getActivities: protectedProcedure

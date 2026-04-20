@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -X POST http://localhost:3000/api/attachments/process -H 'Content-Type: application/json' -d '{\"attachmentId\":\"31badc00-db14-4c55-9543-4d995f46d96c\"}')",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s -X POST http://localhost:3000/api/attachments/process -H 'Content-Type: application/json' -d '{\"attachmentId\":\"9989ff89-d41b-412a-a876-e970dfbfc434\"}')",
+      "Bash(curl -s -X POST http://localhost:3000/api/attachments/process -H 'Content-Type: application/json' -d '{\"attachmentId\":\"d5460dbb-542a-4db5-a149-6e2a16232380\"}')",
+      "Bash(node -e ' *)"
+    ]
+  }
+}

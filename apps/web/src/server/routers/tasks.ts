@@ -2,6 +2,13 @@ import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import type { Prisma } from '@prisma/client'
 import { createTRPCRouter, protectedProcedure } from '../trpc'
+import {
+  logActivity,
+  ACT_TASK_CREATED,
+  ACT_TASK_UPDATED,
+  ACT_TASK_COMPLETED,
+  ACT_TASK_ASSIGNED,
+} from '../lib/activity'
 
 export const tasksRouter = createTRPCRouter({
   list: protectedProcedure
@@ -64,7 +71,7 @@ export const tasksRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      return ctx.prisma.task.create({
+      const task = await ctx.prisma.task.create({
         data: {
           workspace_id: ctx.workspaceId!,
           author_id: ctx.userId!,
@@ -79,6 +86,33 @@ export const tasksRouter = createTRPCRouter({
           company_id: input.company_id ?? null,
         },
       })
+
+      if (input.contact_id) {
+        await logActivity({
+          prisma: ctx.prisma,
+          workspaceId: ctx.workspaceId!,
+          actorId: ctx.userId!,
+          type: ACT_TASK_CREATED,
+          data: { taskId: task.id, title: task.title, dueAt: task.due_at?.toISOString() },
+          recordType: 'contact',
+          recordId: input.contact_id,
+          contactId: input.contact_id,
+        })
+      }
+      if (input.company_id) {
+        await logActivity({
+          prisma: ctx.prisma,
+          workspaceId: ctx.workspaceId!,
+          actorId: ctx.userId!,
+          type: ACT_TASK_CREATED,
+          data: { taskId: task.id, title: task.title, dueAt: task.due_at?.toISOString() },
+          recordType: 'company',
+          recordId: input.company_id,
+          companyId: input.company_id,
+        })
+      }
+
+      return task
     }),
 
   update: protectedProcedure
@@ -126,7 +160,50 @@ export const tasksRouter = createTRPCRouter({
         updateData.completed_at = null
       }
 
-      return ctx.prisma.task.update({ where: { id }, data: updateData })
+      const updatedTask = await ctx.prisma.task.update({ where: { id }, data: updateData })
+
+      const linkedContactId = updatedTask.contact_id ?? existing.contact_id
+      const linkedCompanyId = updatedTask.company_id ?? existing.company_id
+
+      if (linkedContactId) {
+        // Determine the most specific activity type
+        let actType = ACT_TASK_UPDATED
+        if (updateData.completed_at instanceof Date && !existing.completed_at) {
+          actType = ACT_TASK_COMPLETED
+        } else if (data.contact_id && !existing.contact_id) {
+          actType = ACT_TASK_ASSIGNED
+        }
+
+        await logActivity({
+          prisma: ctx.prisma,
+          workspaceId: ctx.workspaceId!,
+          actorId: ctx.userId!,
+          type: actType,
+          data: { taskId: id, title: updatedTask.title },
+          recordType: 'contact',
+          recordId: linkedContactId,
+          contactId: linkedContactId,
+        })
+      }
+
+      if (linkedCompanyId) {
+        let actType = ACT_TASK_UPDATED
+        if (updateData.completed_at instanceof Date && !existing.completed_at) {
+          actType = ACT_TASK_COMPLETED
+        }
+        await logActivity({
+          prisma: ctx.prisma,
+          workspaceId: ctx.workspaceId!,
+          actorId: ctx.userId!,
+          type: actType,
+          data: { taskId: id, title: updatedTask.title },
+          recordType: 'company',
+          recordId: linkedCompanyId,
+          companyId: linkedCompanyId,
+        })
+      }
+
+      return updatedTask
     }),
 
   delete: protectedProcedure

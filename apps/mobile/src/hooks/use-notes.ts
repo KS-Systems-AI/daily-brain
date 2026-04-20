@@ -229,20 +229,20 @@ export function useSearchNotes(search: string, enabled: boolean) {
 
   return useQuery({
     queryKey: ['notes-search', workspaceId, search],
-    enabled: enabled && !!workspaceId,
+    enabled: enabled && !!workspaceId && search.trim().length > 0,
     queryFn: async () => {
-      let query = supabase
+      const term = search.trim()
+      const { data, error } = await supabase
         .from('notes')
-        .select('id, title')
+        .select(
+          'id, title, content_text, is_pinned, is_archived, contact_id, company_id, created_at, updated_at, contact:contacts!notes_contact_id_fkey(id,first_name,last_name), company:companies!notes_company_id_fkey(id,name)',
+        )
         .eq('workspace_id', workspaceId!)
         .is('deleted_at', null)
-        .is('parent_id', null)
+        .eq('is_archived', false)
+        .or(`title.ilike.%${term}%,content_text.ilike.%${term}%`)
         .order('updated_at', { ascending: false })
         .limit(30)
-      if (search.trim()) {
-        query = query.ilike('title', `%${search.trim()}%`)
-      }
-      const { data, error } = await query
       if (error) throw error
       return data
     },

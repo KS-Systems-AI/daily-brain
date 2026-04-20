@@ -15,6 +15,9 @@ import { parseTaskInput, formatRelativeDate, formatTime } from '@/lib/task-parse
 
 type Phase = 'idle' | 'listening' | 'success' | 'error'
 
+const SILENCE_TIMEOUT_MS = 3500
+const MIN_RECORDING_MS = 1200
+
 export default function VoiceTaskScreen() {
   const router = useRouter()
   const createTask = useCreateTask()
@@ -26,7 +29,16 @@ export default function VoiceTaskScreen() {
   const fadeAnim = useRef(new Animated.Value(0)).current
   const savedRef = useRef(false)
   const silenceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const SILENCE_TIMEOUT_MS = 2000
+  const recordingStartRef = useRef<number>(0)
+  // Refs to avoid stale closures in event handlers
+  const phaseRef = useRef<Phase>('idle')
+  const finalTextRef = useRef('')
+  const transcriptRef = useRef('')
+
+  const setPhaseAndRef = useCallback((p: Phase) => {
+    phaseRef.current = p
+    setPhase(p)
+  }, [])
 
   const parsed = useMemo(() => {
     const text = finalText || transcript
@@ -34,64 +46,79 @@ export default function VoiceTaskScreen() {
     return parseTaskInput(text)
   }, [transcript, finalText])
 
+  // Must be defined before startListening to avoid TDZ reference error
+  const resetSilenceTimer = useCallback(() => {
+    if (silenceTimer.current) clearTimeout(silenceTimer.current)
+    // Ensure at least MIN_RECORDING_MS has elapsed before the silence timeout fires
+    const elapsed = Date.now() - recordingStartRef.current
+    const delay = elapsed < MIN_RECORDING_MS
+      ? (MIN_RECORDING_MS - elapsed) + SILENCE_TIMEOUT_MS
+      : SILENCE_TIMEOUT_MS
+    silenceTimer.current = setTimeout(() => {
+      ExpoSpeechRecognitionModule.stop()
+    }, delay)
+  }, [])
+
   const startListening = useCallback(async () => {
     const { status } = await ExpoSpeechRecognitionModule.requestPermissionsAsync()
     if (status !== 'granted') {
-      setPhase('error')
+      setPhaseAndRef('error')
       setErrorMsg('Mikrofon-Berechtigung benötigt')
       return
     }
 
-    setPhase('listening')
+    setPhaseAndRef('listening')
     setTranscript('')
     setFinalText('')
+    finalTextRef.current = ''
+    transcriptRef.current = ''
     savedRef.current = false
+    recordingStartRef.current = Date.now()
 
     ExpoSpeechRecognitionModule.start({
       lang: 'de-DE',
       interimResults: true,
       requiresOnDeviceRecognition: false,
+      continuous: true,
     })
 
     resetSilenceTimer()
-  }, [resetSilenceTimer])
-
-  const resetSilenceTimer = useCallback(() => {
-    if (silenceTimer.current) clearTimeout(silenceTimer.current)
-    silenceTimer.current = setTimeout(() => {
-      ExpoSpeechRecognitionModule.stop()
-    }, SILENCE_TIMEOUT_MS)
-  }, [])
+  }, [resetSilenceTimer, setPhaseAndRef])
 
   useSpeechRecognitionEvent('result', (event) => {
     const text = event.results[0]?.transcript ?? ''
     if (event.isFinal) {
+      finalTextRef.current = text
+      transcriptRef.current = text
       setFinalText(text)
       setTranscript(text)
       if (silenceTimer.current) clearTimeout(silenceTimer.current)
       ExpoSpeechRecognitionModule.stop()
     } else {
+      transcriptRef.current = text
       setTranscript(text)
       resetSilenceTimer()
     }
   })
 
   useSpeechRecognitionEvent('end', () => {
-    if (phase === 'listening') {
-      if (finalText || transcript) {
-        saveTask(finalText || transcript)
+    // Read from refs to avoid stale closure values
+    if (phaseRef.current === 'listening') {
+      const text = finalTextRef.current || transcriptRef.current
+      if (text) {
+        saveTask(text)
       } else {
-        setPhase('idle')
+        setPhaseAndRef('idle')
       }
     }
   })
 
   useSpeechRecognitionEvent('error', (event) => {
     if (event.error === 'no-speech') {
-      setPhase('idle')
+      setPhaseAndRef('idle')
       return
     }
-    setPhase('error')
+    setPhaseAndRef('error')
     setErrorMsg('Spracherkennung fehlgeschlagen')
   })
 
@@ -106,7 +133,7 @@ export default function VoiceTaskScreen() {
         due_at: result.due_at?.toISOString() ?? null,
         end_at: result.end_at?.toISOString() ?? null,
       })
-      setPhase('success')
+      setPhaseAndRef('success')
 
       Animated.timing(fadeAnim, {
         toValue: 1, duration: 300, useNativeDriver: true,
@@ -120,10 +147,10 @@ export default function VoiceTaskScreen() {
         }
       }, 1500)
     } catch {
-      setPhase('error')
+      setPhaseAndRef('error')
       setErrorMsg('Aufgabe konnte nicht gespeichert werden')
     }
-  }, [createTask, fadeAnim, router])
+  }, [createTask, fadeAnim, router, setPhaseAndRef])
 
   useEffect(() => {
     startListening()
@@ -153,12 +180,13 @@ export default function VoiceTaskScreen() {
     return () => sub.remove()
   }, [])
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     if (silenceTimer.current) clearTimeout(silenceTimer.current)
+    phaseRef.current = 'idle' // prevent end-event from triggering saveTask after abort
     ExpoSpeechRecognitionModule.abort()
     if (router.canGoBack()) router.back()
     else router.replace('/(tabs)/dashboard')
-  }
+  }, [router])
 
   return (
     <SafeAreaView style={styles.container}>

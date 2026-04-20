@@ -8,10 +8,12 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
+    "sync:ios": "expo prebuild --platform ios --no-install",
     "build:ios": "eas build --platform ios",
     "build:android": "eas build --platform android",
     "lint": "expo lint",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "eas-build-post-install": "bash -c 'if [ \"$EAS_BUILD_PLATFORM\" = \"ios\" ]; then npx expo prebuild --platform ios --no-install; fi'"
   },
   "dependencies": {
     "@bacons/apple-targets": "^4.0.6",

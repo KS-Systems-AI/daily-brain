@@ -17,7 +17,10 @@
       "bundleIdentifier": "com.dailybrain.app",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Daily Brain benötigt Zugriff auf das Mikrofon für die Spracheingabe von Aufgaben.",
-        "NSSpeechRecognitionUsageDescription": "Daily Brain nutzt die Spracherkennung, um diktierte Aufgaben in Text umzuwandeln."
+        "NSSpeechRecognitionUsageDescription": "Daily Brain nutzt die Spracherkennung, um diktierte Aufgaben in Text umzuwandeln.",
+        "NSPhotoLibraryUsageDescription": "Daily Brain kann auf deine Fotomediathek zugreifen, wenn du Bilder auswählst oder einfügst (z. B. in Notizen). Der Zugriff erfolgt nur auf deine ausdrückliche Aktion.",
+        "NSPhotoLibraryAddUsageDescription": "Daily Brain darf Bilder in deiner Fotomediathek speichern, wenn du z. B. ein Foto aus der App exportierst oder speicherst.",
+        "NSCameraUsageDescription": "Daily Brain benötigt Zugriff auf die Kamera, wenn du ein Foto direkt aufnehmen möchtest (z. B. für Notizen)."
       }
     },
     "android": {

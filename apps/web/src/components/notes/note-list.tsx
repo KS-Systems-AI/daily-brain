@@ -12,21 +12,45 @@ import {
   Layers,
   User,
   Building2,
+  Search,
+  X,
 } from 'lucide-react'
-import { useState, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useCallback, useRef, useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 
 export function NoteList() {
   const router = useRouter()
   const utils = trpc.useUtils()
   const [contextMenuId, setContextMenuId] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const searchParams = useSearchParams()
 
-  const { data, isLoading, isFetching } = trpc.notes.list.useQuery({
-    limit: 50,
-    is_archived: false,
-  })
+  useEffect(() => {
+    if (searchParams.get('focus') === 'search') {
+      setTimeout(() => searchInputRef.current?.focus(), 100)
+    }
+  }, [searchParams])
 
-  const showLoading = isLoading && !data
+  const isSearching = debouncedQuery.length > 0
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(searchQuery), 250)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  const { data, isLoading, isFetching } = trpc.notes.list.useQuery(
+    { limit: 50, is_archived: false },
+    { enabled: !isSearching },
+  )
+
+  const { data: searchData, isFetching: isSearchFetching } = trpc.notes.search.useQuery(
+    { query: debouncedQuery, limit: 30 },
+    { enabled: isSearching },
+  )
+
+  const showLoading = isLoading && !data && !isSearching
 
   const createNote = trpc.notes.create.useMutation({
     onSuccess: (note) => {
@@ -48,8 +72,10 @@ export function NoteList() {
   }, [createNote])
 
   const notes = data?.items ?? []
-  const pinnedNotes = notes.filter((n) => n.is_pinned)
-  const unpinnedNotes = notes.filter((n) => !n.is_pinned)
+  const searchResults = searchData?.items ?? []
+  const displayNotes = isSearching ? searchResults : notes
+  const pinnedNotes = isSearching ? [] : displayNotes.filter((n) => n.is_pinned)
+  const unpinnedNotes = isSearching ? displayNotes : displayNotes.filter((n) => !n.is_pinned)
 
   return (
     <div className="flex h-full flex-col">
@@ -57,9 +83,11 @@ export function NoteList() {
         <div className="flex items-center gap-2.5">
           <FileText size={16} className="text-muted-foreground" />
           <h1 className="text-[13px] font-medium text-foreground">Notizen</h1>
-          <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-            {notes.length}
-          </span>
+          {!isSearching && (
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+              {notes.length}
+            </span>
+          )}
         </div>
         <button
           onClick={handleNewNote}
@@ -78,6 +106,35 @@ export function NoteList() {
           </div>
         ) : (
           <div className="p-6">
+            {/* Suchleiste — gleicher Stil wie Aufgaben-Eingabe */}
+            <div className="mb-4">
+              <div className="relative flex items-center gap-2.5 rounded-lg border border-border px-3.5 py-2.5 shadow-sm transition-colors focus-within:border-ring/40">
+                <Search size={15} className="shrink-0 text-muted-foreground/40" />
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Notizen durchsuchen..."
+                  className="flex-1 bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => { setSearchQuery(''); searchInputRef.current?.focus() }}
+                    className="shrink-0 rounded p-0.5 text-muted-foreground/40 transition-colors hover:text-muted-foreground"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+              {isSearching && (
+                <p className="mt-1.5 px-1 text-[11px] text-muted-foreground/50">
+                  {isSearchFetching
+                    ? 'Suche...'
+                    : `${searchResults.length} Ergebnis${searchResults.length !== 1 ? 'se' : ''} für „${debouncedQuery}"`}
+                </p>
+              )}
+            </div>
             {pinnedNotes.length > 0 && (
               <div className="mb-6">
                 <div className="mb-2 flex items-center gap-1.5 px-0.5">
@@ -111,6 +168,7 @@ export function NoteList() {
                 <NoteCard
                   key={note.id}
                   note={note}
+                  searchQuery={isSearching ? debouncedQuery : undefined}
                   showContextMenu={contextMenuId === note.id}
                   onToggleContextMenu={() =>
                     setContextMenuId(contextMenuId === note.id ? null : note.id)
@@ -124,7 +182,7 @@ export function NoteList() {
               ))}
             </div>
 
-            {notes.length === 0 && (
+            {displayNotes.length === 0 && !isSearching && (
               <div className="py-24 text-center">
                 <p className="text-[13px] text-muted-foreground/50">Noch keine Notizen</p>
                 <button
@@ -134,6 +192,15 @@ export function NoteList() {
                   <Plus size={13} />
                   Notiz erstellen
                 </button>
+              </div>
+            )}
+
+            {displayNotes.length === 0 && isSearching && !isSearchFetching && (
+              <div className="py-24 text-center">
+                <Search size={28} className="mx-auto mb-3 text-muted-foreground/20" />
+                <p className="text-[13px] text-muted-foreground/50">
+                  Keine Notizen für „{debouncedQuery}" gefunden
+                </p>
               </div>
             )}
           </div>
@@ -158,8 +225,22 @@ interface NoteItem {
   _count?: { children: number }
 }
 
+function highlightMatch(text: string, query: string | undefined): React.ReactNode {
+  if (!query || !text) return text
+  const idx = text.toLowerCase().indexOf(query.toLowerCase())
+  if (idx === -1) return text
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="rounded-sm bg-yellow-200/60 px-0.5 dark:bg-yellow-800/40">{text.slice(idx, idx + query.length)}</mark>
+      {text.slice(idx + query.length)}
+    </>
+  )
+}
+
 function NoteCard({
   note,
+  searchQuery,
   showContextMenu,
   onToggleContextMenu,
   onDelete,
@@ -167,6 +248,7 @@ function NoteCard({
   onArchive,
 }: {
   note: NoteItem
+  searchQuery?: string
   showContextMenu: boolean
   onToggleContextMenu: () => void
   onDelete: () => void
@@ -174,7 +256,18 @@ function NoteCard({
   onArchive: () => void
 }) {
   const router = useRouter()
-  const preview = (note.content_text ?? '').slice(0, 120)
+  const fullText = note.content_text ?? ''
+  let preview: string
+  if (searchQuery && fullText) {
+    const idx = fullText.toLowerCase().indexOf(searchQuery.toLowerCase())
+    if (idx > 30) {
+      preview = '...' + fullText.slice(idx - 20, idx + 100)
+    } else {
+      preview = fullText.slice(0, 120)
+    }
+  } else {
+    preview = fullText.slice(0, 120)
+  }
   const contactName = [note.contact?.first_name, note.contact?.last_name].filter(Boolean).join(' ')
   const hasContact = Boolean(note.contact_id)
   const hasCompany = Boolean(note.company_id)
@@ -186,7 +279,7 @@ function NoteCard({
     >
       <div className="mb-1.5 flex items-start justify-between">
         <h3 className="text-[13px] font-medium text-foreground line-clamp-1">
-          {note.title || 'Ohne Titel'}
+          {searchQuery ? highlightMatch(note.title || 'Ohne Titel', searchQuery) : (note.title || 'Ohne Titel')}
         </h3>
         <button
           onClick={(e) => {
@@ -200,7 +293,7 @@ function NoteCard({
       </div>
 
       <p className="mb-3 text-[12px] leading-[1.6] text-muted-foreground/60 line-clamp-3">
-        {preview || 'Leere Notiz'}
+        {searchQuery ? highlightMatch(preview, searchQuery) : (preview || 'Leere Notiz')}
       </p>
 
       {(hasContact || hasCompany) && (

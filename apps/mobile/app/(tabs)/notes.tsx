@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useState, useEffect, useRef } from 'react'
 import {
   View,
   Text,
@@ -6,11 +6,12 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  TextInput,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
-import { useNotes } from '@/hooks/use-notes'
+import { useNotes, useSearchNotes } from '@/hooks/use-notes'
 
 function formatRelativeTime(dateStr: string): string {
   const now = Date.now()
@@ -54,11 +55,23 @@ interface NoteItem {
 export default function NotesScreen() {
   const router = useRouter()
   const { data, isLoading, refetch, isRefetching } = useNotes()
+  const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
+  const searchInputRef = useRef<TextInput>(null)
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(searchQuery), 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  const isSearching = debouncedQuery.length > 0
+  const { data: searchData, isFetching: isSearchFetching } = useSearchNotes(debouncedQuery, isSearching)
 
   const notes: NoteItem[] = (data ?? []) as NoteItem[]
+  const displayNotes: NoteItem[] = isSearching ? ((searchData ?? []) as NoteItem[]) : notes
 
-  const sorted = [...notes].sort((a, b) => {
-    if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1
+  const sorted = [...displayNotes].sort((a, b) => {
+    if (!isSearching && a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1
     return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
   })
 
@@ -133,9 +146,11 @@ export default function NotesScreen() {
       <View style={styles.header}>
         <Ionicons name="document-text-outline" size={18} color="#6b7280" />
         <Text style={styles.headerTitle}>Notizen</Text>
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>{sorted.length}</Text>
-        </View>
+        {!isSearching && (
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>{notes.length}</Text>
+          </View>
+        )}
         <View style={{ flex: 1 }} />
         <TouchableOpacity
           onPress={() => router.push('/note/new')}
@@ -145,7 +160,39 @@ export default function NotesScreen() {
         </TouchableOpacity>
       </View>
 
-      {isLoading ? (
+      {/* Suchleiste */}
+      <View style={styles.searchContainer}>
+        <View style={styles.searchInputWrapper}>
+          <Ionicons name="search-outline" size={16} color="#9ca3af" style={styles.searchIcon} />
+          <TextInput
+            ref={searchInputRef}
+            style={styles.searchInput}
+            placeholder="Notizen durchsuchen..."
+            placeholderTextColor="#9ca3af"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            returnKeyType="search"
+            autoCorrect={false}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity
+              onPress={() => { setSearchQuery(''); searchInputRef.current?.focus() }}
+              hitSlop={8}
+            >
+              <Ionicons name="close-circle" size={18} color="#9ca3af" />
+            </TouchableOpacity>
+          )}
+        </View>
+        {isSearching && (
+          <Text style={styles.searchInfo}>
+            {isSearchFetching
+              ? 'Suche...'
+              : `${sorted.length} Ergebnis${sorted.length !== 1 ? 'se' : ''}`}
+          </Text>
+        )}
+      </View>
+
+      {isLoading && !isSearching ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#E8713A" />
         </View>
@@ -204,6 +251,34 @@ const styles = StyleSheet.create({
   },
   addBtn: {
     padding: 4,
+  },
+  searchContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  searchInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f3f4f6',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    height: 38,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#111827',
+    paddingVertical: 0,
+  },
+  searchInfo: {
+    fontSize: 11,
+    color: '#9ca3af',
+    marginTop: 6,
   },
   listContent: {
     paddingHorizontal: 20,

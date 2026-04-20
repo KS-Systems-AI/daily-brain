@@ -86,7 +86,9 @@ export function usePushNotifications() {
           .eq('id', data.notificationId)
           .then(() => {})
       }
-      if (data?.taskId) {
+      if (data?.type === 'event_reminder' || data?.type === 'event_starting') {
+        router.push('/(tabs)/calendar' as any)
+      } else if (data?.taskId) {
         router.push('/tasks' as any)
       } else {
         router.push('/(tabs)/dashboard' as any)

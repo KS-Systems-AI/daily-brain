@@ -28,20 +28,23 @@ model Workspace {
   updated_at DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
   deleted_at DateTime? @db.Timestamptz(6)
 
-  members       WorkspaceMember[]
-  contacts      Contact[]
-  companies     Company[]
-  deals         Deal[]
-  pipelines     Pipeline[]
-  notes         Note[]
-  tasks         Task[]
-  activities    Activity[]
-  objects       CustomObject[]
-  records       CustomRecord[]
-  automations   Automation[]
-  emailAccounts EmailAccount[]
-  views         View[]
-  notifications Notification[]
+  members          WorkspaceMember[]
+  contacts         Contact[]
+  companies        Company[]
+  deals            Deal[]
+  pipelines        Pipeline[]
+  notes            Note[]
+  tasks            Task[]
+  activities       Activity[]
+  objects          CustomObject[]
+  records          CustomRecord[]
+  automations      Automation[]
+  emailAccounts    EmailAccount[]
+  views            View[]
+  notifications    Notification[]
+  attachments      Attachment[]
+  calendarAccounts CalendarAccount[]
+  calendarEvents   CalendarEvent[]
 
   @@map("workspaces")
 }
@@ -54,15 +57,17 @@ model User {
   created_at DateTime  @default(now()) @db.Timestamptz(6)
   updated_at DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
 
-  workspaces     WorkspaceMember[]
-  authored_notes Note[]            @relation("NoteAuthor")
-  assigned_tasks Task[]            @relation("TaskAssignee")
-  authored_tasks Task[]            @relation("TaskAuthor")
-  activities     Activity[]
-  emailAccounts  EmailAccount[]
-  views          View[]
-  notifications  Notification[]
-  push_tokens    PushToken[]
+  workspaces       WorkspaceMember[]
+  authored_notes   Note[]            @relation("NoteAuthor")
+  assigned_tasks   Task[]            @relation("TaskAssignee")
+  authored_tasks   Task[]            @relation("TaskAuthor")
+  activities       Activity[]
+  emailAccounts    EmailAccount[]
+  views            View[]
+  notifications    Notification[]
+  push_tokens      PushToken[]
+  attachments      Attachment[]
+  calendarAccounts CalendarAccount[]
 
   @@map("users")
 }
@@ -317,26 +322,31 @@ model Task {
 // ─────────────────────────────────────────────────
 
 model Notification {
-  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspace_id String    @db.Uuid
-  user_id      String    @db.Uuid
-  task_id      String?   @db.Uuid
-  type         String    @db.VarChar(50) // 'task_due_now', 'task_due_soon'
-  title        String    @db.VarChar(300)
-  body         String?   @db.Text
-  read_at      DateTime? @db.Timestamptz(6)
-  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id   String    @db.Uuid
+  user_id        String    @db.Uuid
+  task_id        String?   @db.Uuid
+  event_id       String?   @db.Uuid
+  type           String    @db.VarChar(50) // 'task_due_now', 'task_due_soon', 'event_starting', 'event_reminder'
+  title          String    @db.VarChar(300)
+  body           String?   @db.Text
+  read_at        DateTime? @db.Timestamptz(6)
+  created_at     DateTime  @default(now()) @db.Timestamptz(6)
   /// Fälligkeitszeitpunkt der Aufgabe zum Zeitpunkt der Erinnerung (Deduplizierung pro Termin)
-  task_due_at  DateTime? @db.Timestamptz(6)
+  task_due_at    DateTime? @db.Timestamptz(6)
+  /// Startzeit des Kalender-Events (Deduplizierung)
+  event_start_at DateTime? @db.Timestamptz(6)
 
-  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
-  user      User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  task      Task?     @relation(fields: [task_id], references: [id], onDelete: Cascade)
+  workspace Workspace      @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  user      User            @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  task      Task?           @relation(fields: [task_id], references: [id], onDelete: Cascade)
+  event     CalendarEvent?  @relation(fields: [event_id], references: [id], onDelete: Cascade)
 
   @@index([user_id, read_at])
   @@index([workspace_id])
   @@index([task_id])
   @@index([task_id, type, task_due_at])
+  @@index([event_id, type, event_start_at])
   @@map("notifications")
 }
 
@@ -580,6 +590,38 @@ model AutomationRun {
 }
 
 // ─────────────────────────────────────────────────
+// ATTACHMENTS
+// ─────────────────────────────────────────────────
+
+model Attachment {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id   String    @db.Uuid
+  uploaded_by_id String    @db.Uuid
+  contact_id     String?   @db.Uuid
+  company_id     String?   @db.Uuid
+  deal_id        String?   @db.Uuid
+  note_id        String?   @db.Uuid
+  filename       String    @db.VarChar(500)
+  mime_type      String    @db.VarChar(200)
+  size_bytes     Int
+  storage_key    String    @db.Text
+  ocr_text       String?   @db.Text
+  ai_summary     String?   @db.Text
+  ocr_status     String    @default("pending") @db.VarChar(50) // 'pending' | 'processing' | 'done' | 'skipped'
+  ocr_method     String?   @db.VarChar(50) // 'pdf-text' | 'claude-vision' | 'skipped'
+  created_at     DateTime  @default(now()) @db.Timestamptz(6)
+  deleted_at     DateTime? @db.Timestamptz(6)
+
+  workspace   Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  uploaded_by User      @relation(fields: [uploaded_by_id], references: [id])
+
+  @@index([workspace_id])
+  @@index([contact_id])
+  @@index([company_id])
+  @@map("attachments")
+}
+
+// ─────────────────────────────────────────────────
 // VIEWS (saved filters/sorts/columns)
 // ─────────────────────────────────────────────────
 
@@ -604,4 +646,88 @@ model View {
 
   @@index([workspace_id, user_id, object_type])
   @@map("views")
+}
+
+// ─────────────────────────────────────────────────
+// CALENDAR SYNC
+// ─────────────────────────────────────────────────
+
+model CalendarAccount {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id   String    @db.Uuid
+  user_id        String    @db.Uuid
+  provider       String    @db.VarChar(50)    // 'google' | 'microsoft'
+  email          String    @db.VarChar(255)
+  display_name   String?   @db.VarChar(255)
+  calendar_id    String?   @db.Text           // primäre Kalender-ID beim Anbieter
+  access_token   String    @db.Text
+  refresh_token  String    @db.Text
+  token_scope    String?   @db.Text
+  expires_at     DateTime? @db.Timestamptz(6)
+  is_active      Boolean   @default(true)
+  sync_token     String?   @db.Text           // inkrementeller Sync-Token (Google nextSyncToken / Microsoft deltaLink)
+  last_synced_at DateTime? @db.Timestamptz(6)
+  created_at     DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at     DateTime? @db.Timestamptz(6)
+
+  workspace Workspace       @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  user      User            @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  events    CalendarEvent[]
+
+  @@unique([workspace_id, email, provider])
+  @@index([workspace_id])
+  @@map("calendar_accounts")
+}
+
+model CalendarEvent {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id         String    @db.Uuid
+  account_id           String    @db.Uuid
+  external_id          String    @db.Text           // Termin-ID beim Anbieter
+  title                String    @db.Text
+  description          String?   @db.Text
+  location             String?   @db.Text
+  start_at             DateTime  @db.Timestamptz(6)
+  end_at               DateTime  @db.Timestamptz(6)
+  is_all_day           Boolean   @default(false)
+  attendees            Json      @default("[]")     // [{email, name, responseStatus}]
+  organizer_email      String?   @db.VarChar(255)
+  status               String    @default("confirmed") @db.VarChar(20) // 'confirmed'|'tentative'|'cancelled'
+  // Serientermine
+  recurrence_rule           String?   @db.Text           // RRULE-String (z.B. RRULE:FREQ=WEEKLY;BYDAY=TU,TH)
+  recurrence_master_id      String?   @db.Uuid           // lokale UUID des Serien-Haupttermins
+  recurring_event_id        String?   @db.Text           // externe ID des Master-Termins (Google recurringEventId)
+  original_start_at         DateTime? @db.Timestamptz(6) // ursprünglicher Startzeitpunkt der Instanz
+  // CRM-Verknüpfung
+  record_type          String?   @db.VarChar(50)    // 'contact'|'company'|'deal'
+  record_id            String?   @db.Uuid
+  created_at           DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at           DateTime? @db.Timestamptz(6)
+
+  workspace     Workspace            @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  account       CalendarAccount      @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  links         CalendarEventLink[]
+  notifications Notification[]
+
+  @@unique([account_id, external_id])
+  @@index([workspace_id, start_at, end_at])
+  @@map("calendar_events")
+}
+
+model CalendarEventLink {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String   @db.Uuid
+  event_id     String   @db.Uuid
+  record_type  String   @db.VarChar(50) // 'contact' | 'company'
+  record_id    String   @db.Uuid
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+
+  event CalendarEvent @relation(fields: [event_id], references: [id], onDelete: Cascade)
+
+  @@unique([event_id, record_type, record_id])
+  @@index([workspace_id, record_type, record_id])
+  @@index([event_id])
+  @@map("calendar_event_links")
 }

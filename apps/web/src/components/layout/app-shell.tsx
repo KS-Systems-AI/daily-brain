@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation'
 import {
   Home,
   Bell,
+  CalendarDays,
   CheckSquare,
   FileText,
   Mail,
@@ -43,6 +44,7 @@ import { TaskFormDialog } from '@/components/tasks/task-form-dialog'
 const mainNav = [
   { href: '/dashboard', label: 'Start', icon: Home },
   { href: '/notifications', label: 'Benachrichtigungen', icon: Bell },
+  { href: '/calendar', label: 'Kalender', icon: CalendarDays },
   { href: '/tasks', label: 'Aufgaben', icon: CheckSquare, badge: true },
   { href: '/notes', label: 'Notizen', icon: FileText },
   { href: '/emails', label: 'E-Mails', icon: Mail },
@@ -132,13 +134,17 @@ export function AppShell({ children }: { children: React.ReactNode }): React.JSX
 
         {/* Suche */}
         <div className="px-3 pb-2">
-          <button className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-sidebar-foreground transition-colors hover:bg-muted">
+          <button
+            onClick={() => router.push('/notes?focus=search')}
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-sidebar-foreground transition-colors hover:bg-muted"
+          >
             <Search size={14} className="shrink-0" />
+            <span>Suche</span>
           </button>
         </div>
 
         {/* Scrollbare Navigation */}
-        <nav className="flex flex-1 flex-col overflow-y-auto px-2">
+        <nav className="flex flex-1 flex-col overflow-y-auto px-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
           {/* Hauptnav */}
           <div className="space-y-0.5">
             {mainNav.map(({ href, label, icon: Icon, ...rest }) => {

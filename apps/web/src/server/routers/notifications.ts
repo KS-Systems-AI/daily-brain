@@ -29,6 +29,8 @@ export const notificationsRouter = createTRPCRouter({
           created_at: true,
           task_id: true,
           task: { select: { id: true, title: true, status: true, due_at: true } },
+          event_id: true,
+          event: { select: { id: true, title: true, start_at: true, location: true } },
         },
       })
 

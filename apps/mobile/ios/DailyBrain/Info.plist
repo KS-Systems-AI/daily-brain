@@ -49,6 +49,12 @@
     <string>Daily Brain benötigt Zugriff auf das Mikrofon für die Spracheingabe von Aufgaben.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>Daily Brain nutzt die Spracherkennung, um diktierte Aufgaben in Text umzuwandeln.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Daily Brain kann auf deine Fotomediathek zugreifen, wenn du Bilder auswählst oder einfügst (z. B. in Notizen). Der Zugriff erfolgt nur auf deine ausdrückliche Aktion.</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>Daily Brain darf Bilder in deiner Fotomediathek speichern, wenn du z. B. ein Foto aus der App exportierst oder speicherst.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>Daily Brain benötigt Zugriff auf die Kamera, wenn du ein Foto direkt aufnehmen möchtest (z. B. für Notizen).</string>
     <key>NSUserActivityTypes</key>
     <array>
       <string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>

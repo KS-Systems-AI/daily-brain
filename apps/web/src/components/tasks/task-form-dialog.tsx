@@ -79,10 +79,18 @@ interface TaskFormDialogProps {
 export function TaskFormDialog({ open, onOpenChange, task, initialRecord }: TaskFormDialogProps) {
   const utils = trpc.useUtils()
   const createTask = trpc.tasks.create.useMutation({
-    onSuccess: () => { utils.tasks.list.invalidate(); utils.tasks.completed.invalidate() },
+    onSuccess: (task) => {
+      utils.tasks.list.invalidate()
+      utils.tasks.completed.invalidate()
+      if (task.contact_id) void utils.contacts.getTasks.invalidate({ contactId: task.contact_id })
+    },
   })
   const updateTask = trpc.tasks.update.useMutation({
-    onSuccess: () => { utils.tasks.list.invalidate(); utils.tasks.completed.invalidate() },
+    onSuccess: (task) => {
+      utils.tasks.list.invalidate()
+      utils.tasks.completed.invalidate()
+      if (task.contact_id) void utils.contacts.getTasks.invalidate({ contactId: task.contact_id })
+    },
   })
 
   const [formTitle, setFormTitle] = useState('')

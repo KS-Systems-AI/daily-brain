@@ -39,7 +39,16 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // Public routes
-  const publicPaths = ['/login', '/register', '/auth/callback', '/api/trpc']
+  const publicPaths = [
+    '/login',
+    '/register',
+    '/auth/callback',
+    '/api/trpc',
+    '/api/attachments/process',
+    '/api/calendar/google/callback',
+    '/api/calendar/microsoft/callback',
+    '/api/calendar/sync',
+  ]
   const isPublic = publicPaths.some((p) => pathname.startsWith(p))
 
   if (!user && !isPublic) {

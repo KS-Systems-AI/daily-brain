@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import type { Prisma } from '@prisma/client'
 import { createTRPCRouter, protectedProcedure } from '../trpc'
+import { logActivity, ACT_NOTE_CREATED, ACT_NOTE_UPDATED } from '../lib/activity'
 import {
   tiptapJsonToBlocks,
   blocksToTiptapJson,
@@ -27,6 +28,101 @@ const blockInputSchema = z.object({
 })
 
 export const notesRouter = createTRPCRouter({
+  search: protectedProcedure
+    .input(
+      z.object({
+        query: z.string().min(1).max(200),
+        limit: z.number().int().min(1).max(50).default(20),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const { query, limit } = input
+
+      const tsQuery = query
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((w) => `${w}:*`)
+        .join(' & ')
+
+      if (!tsQuery) return { items: [] }
+
+      const items = await ctx.prisma.$queryRaw<
+        Array<{
+          id: string
+          title: string | null
+          content_text: string | null
+          is_pinned: boolean
+          is_archived: boolean
+          contact_id: string | null
+          company_id: string | null
+          parent_id: string | null
+          created_at: Date
+          updated_at: Date
+          author_id: string
+          author_name: string | null
+          author_avatar: string | null
+          contact_first: string | null
+          contact_last: string | null
+          company_name: string | null
+          rank: number
+        }>
+      >`
+        SELECT
+          n.id, n.title, n.content_text, n.is_pinned, n.is_archived,
+          n.contact_id, n.company_id, n.parent_id,
+          n.created_at, n.updated_at, n.author_id,
+          u.full_name AS author_name, u.avatar_url AS author_avatar,
+          c.first_name AS contact_first, c.last_name AS contact_last,
+          co.name AS company_name,
+          ts_rank(
+            to_tsvector('german', coalesce(n.title, '') || ' ' || coalesce(n.content_text, '')),
+            to_tsquery('german', ${tsQuery})
+          ) AS rank
+        FROM notes n
+        LEFT JOIN users u ON u.id = n.author_id
+        LEFT JOIN contacts c ON c.id = n.contact_id
+        LEFT JOIN companies co ON co.id = n.company_id
+        WHERE n.workspace_id = ${ctx.workspaceId}::uuid
+          AND n.deleted_at IS NULL
+          AND n.is_archived = false
+          AND (
+            to_tsvector('german', coalesce(n.title, '') || ' ' || coalesce(n.content_text, ''))
+            @@ to_tsquery('german', ${tsQuery})
+            OR n.title ILIKE ${'%' + query + '%'}
+            OR n.content_text ILIKE ${'%' + query + '%'}
+          )
+        ORDER BY rank DESC, n.updated_at DESC
+        LIMIT ${limit}
+      `
+
+      return {
+        items: items.map((row) => ({
+          id: row.id,
+          title: row.title,
+          content_text: row.content_text,
+          is_pinned: row.is_pinned,
+          is_archived: row.is_archived,
+          contact_id: row.contact_id,
+          company_id: row.company_id,
+          parent_id: row.parent_id,
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+          author: {
+            id: row.author_id,
+            full_name: row.author_name,
+            avatar_url: row.author_avatar,
+          },
+          contact: row.contact_id
+            ? { id: row.contact_id, first_name: row.contact_first, last_name: row.contact_last }
+            : null,
+          company: row.company_id
+            ? { id: row.company_id, name: row.company_name }
+            : null,
+        })),
+      }
+    }),
+
   list: protectedProcedure
     .input(
       z.object({
@@ -208,6 +304,31 @@ export const notesRouter = createTRPCRouter({
           attrs: {},
         },
       })
+
+      if (input.contact_id) {
+        await logActivity({
+          prisma: ctx.prisma,
+          workspaceId: ctx.workspaceId!,
+          actorId: ctx.userId!,
+          type: ACT_NOTE_CREATED,
+          data: { noteId: note.id, noteTitle: note.title ?? undefined },
+          recordType: 'contact',
+          recordId: input.contact_id,
+          contactId: input.contact_id,
+        })
+      }
+      if (input.company_id) {
+        await logActivity({
+          prisma: ctx.prisma,
+          workspaceId: ctx.workspaceId!,
+          actorId: ctx.userId!,
+          type: ACT_NOTE_CREATED,
+          data: { noteId: note.id, noteTitle: note.title ?? undefined },
+          recordType: 'company',
+          recordId: input.company_id,
+          companyId: input.company_id,
+        })
+      }
 
       return {
         ...note,
@@ -424,6 +545,11 @@ export const notesRouter = createTRPCRouter({
 
       const newBlocks = tiptapJsonToBlocks(input.tiptap_json as unknown as Parameters<typeof tiptapJsonToBlocks>[0])
 
+      const noteForLog = await ctx.prisma.note.findFirst({
+        where: { id: input.note_id, workspace_id: ctx.workspaceId, deleted_at: null },
+        select: { contact_id: true, company_id: true, title: true },
+      })
+
       await ctx.prisma.$transaction(async (tx) => {
         await tx.noteBlock.deleteMany({ where: { note_id: input.note_id } })
 
@@ -451,6 +577,31 @@ export const notesRouter = createTRPCRouter({
           },
         })
       })
+
+      if (noteForLog?.contact_id) {
+        await logActivity({
+          prisma: ctx.prisma,
+          workspaceId: ctx.workspaceId!,
+          actorId: ctx.userId!,
+          type: ACT_NOTE_UPDATED,
+          data: { noteId: input.note_id, noteTitle: noteForLog.title ?? undefined },
+          recordType: 'contact',
+          recordId: noteForLog.contact_id,
+          contactId: noteForLog.contact_id,
+        })
+      }
+      if (noteForLog?.company_id) {
+        await logActivity({
+          prisma: ctx.prisma,
+          workspaceId: ctx.workspaceId!,
+          actorId: ctx.userId!,
+          type: ACT_NOTE_UPDATED,
+          data: { noteId: input.note_id, noteTitle: noteForLog.title ?? undefined },
+          recordType: 'company',
+          recordId: noteForLog.company_id,
+          companyId: noteForLog.company_id,
+        })
+      }
 
       return { success: true }
     }),

@@ -12,6 +12,8 @@ import {
   Plus,
   Send,
   Sparkles,
+  Calendar,
+  MapPin,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useState, useCallback, useMemo } from 'react'
@@ -22,12 +24,6 @@ function getGreeting(): string {
   if (h < 18) return 'Guten Tag'
   return 'Guten Abend'
 }
-
-const mockMeetings = [
-  { id: '1', title: 'Morgen Routine', time: '6:30 - 7:15', color: 'bg-purple-400' },
-  { id: '2', title: 'Team Standup', time: '10:00 - 10:15', color: 'bg-green-400' },
-  { id: '3', title: 'Produkt Review', time: '14:00 - 15:00', color: 'bg-blue-400' },
-]
 
 function isTodayOrOverdue(task: { due_at: Date | null; status: string | null }): boolean {
   const isDone = task.status === 'done' || task.status === 'cancelled'
@@ -45,6 +41,24 @@ function isOverdueOrNoDate(task: { due_at: Date | null; status: string | null })
   return new Date(task.due_at).getTime() < Date.now()
 }
 
+function isTaskForDate(task: { due_at: Date | null; status: string | null }, date: Date): boolean {
+  const isDone = task.status === 'done' || task.status === 'cancelled'
+  if (isDone) return false
+  if (!task.due_at) return false
+  const d = new Date(task.due_at)
+  return d.getFullYear() === date.getFullYear() &&
+    d.getMonth() === date.getMonth() &&
+    d.getDate() === date.getDate()
+}
+
+function fmtTime(d: Date): string {
+  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
+}
+
+type TimelineItem =
+  | { kind: 'event'; sortTime: number; event: { id: string; title: string; start_at: Date | string; end_at: Date | string; is_all_day: boolean; location: string | null; attendees: unknown } }
+  | { kind: 'task'; sortTime: number; task: Task }
+
 export default function DashboardPage() {
   const utils = trpc.useUtils()
   const { data: activeTasks = [] as Task[] } = trpc.tasks.list.useQuery()
@@ -53,14 +67,66 @@ export default function DashboardPage() {
   })
 
   const [chatInput, setChatInput] = useState('')
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const d = new Date()
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  })
 
-  const todayTasks = useMemo(
-    () => activeTasks.filter(isTodayOrOverdue),
-    [activeTasks],
-  )
+  const startOfDay = useMemo(() => new Date(selectedDate), [selectedDate])
+  const endOfDay = useMemo(() => {
+    const d = new Date(selectedDate)
+    d.setDate(d.getDate() + 1)
+    return d
+  }, [selectedDate])
+
+  const { data: calendarEvents = [] } = trpc.calendar.list.useQuery({
+    startAt: startOfDay,
+    endAt: endOfDay,
+  })
+
+  const isToday = useMemo(() => {
+    const now = new Date()
+    return selectedDate.getFullYear() === now.getFullYear() &&
+      selectedDate.getMonth() === now.getMonth() &&
+      selectedDate.getDate() === now.getDate()
+  }, [selectedDate])
+
+  const timeline = useMemo(() => {
+    const items: TimelineItem[] = []
+
+    for (const ev of calendarEvents) {
+      items.push({
+        kind: 'event',
+        sortTime: ev.is_all_day ? -1 : new Date(ev.start_at).getTime(),
+        event: ev,
+      })
+    }
+
+    const tasksForDate = isToday
+      ? (activeTasks as Task[]).filter(isTodayOrOverdue)
+      : (activeTasks as Task[]).filter((t) => isTaskForDate(t, selectedDate))
+
+    for (const task of tasksForDate) {
+      const dueAt = task.due_at ? new Date(task.due_at) : null
+      const hasTime = dueAt && (dueAt.getHours() !== 0 || dueAt.getMinutes() !== 0)
+      items.push({
+        kind: 'task',
+        sortTime: hasTime ? dueAt!.getTime() : Infinity,
+        task,
+      })
+    }
+
+    items.sort((a, b) => {
+      if (a.sortTime === -1 && b.sortTime !== -1) return -1
+      if (b.sortTime === -1 && a.sortTime !== -1) return 1
+      return a.sortTime - b.sortTime
+    })
+
+    return items
+  }, [calendarEvents, activeTasks, selectedDate, isToday])
 
   const badgeCount = useMemo(
-    () => activeTasks.filter(isOverdueOrNoDate).length,
+    () => (activeTasks as Task[]).filter(isOverdueOrNoDate).length,
     [activeTasks],
   )
 
@@ -84,7 +150,28 @@ export default function DashboardPage() {
     [updateTask],
   )
 
-  const today = new Date()
+  const goDay = useCallback((delta: number) => {
+    setSelectedDate((prev) => {
+      const d = new Date(prev)
+      d.setDate(d.getDate() + delta)
+      return d
+    })
+  }, [])
+
+  const goToday = useCallback(() => {
+    const d = new Date()
+    setSelectedDate(new Date(d.getFullYear(), d.getMonth(), d.getDate()))
+  }, [])
+
+  const dateLabel = useMemo(() => {
+    if (isToday) return `Heute, ${selectedDate.toLocaleDateString('de-DE', { day: 'numeric', month: 'short' })}`
+    const now = new Date()
+    const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+    if (selectedDate.getTime() === tomorrow.getTime()) {
+      return `Morgen, ${selectedDate.toLocaleDateString('de-DE', { day: 'numeric', month: 'short' })}`
+    }
+    return selectedDate.toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'short' })
+  }, [selectedDate, isToday])
 
   return (
     <div className="flex h-full flex-col">
@@ -129,91 +216,127 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Termine (Mock) */}
+          {/* Timeline: Termine + Aufgaben */}
           <div className="mt-10">
             <div className="flex items-center justify-between">
-              <h2 className="text-[15px] font-semibold text-foreground">Termine</h2>
+              <h2 className="text-[15px] font-semibold text-foreground">Tagesplan</h2>
               <div className="flex items-center gap-2">
-                <span className="text-[13px] text-muted-foreground">
-                  Heute, {today.toLocaleDateString('de-DE', { day: 'numeric', month: 'short' })}
-                </span>
+                {!isToday ? (
+                  <button
+                    onClick={goToday}
+                    className="rounded px-2 py-0.5 text-[12px] font-medium text-orange-500 transition-colors hover:bg-orange-50"
+                  >
+                    Heute
+                  </button>
+                ) : null}
+                <span className="text-[13px] text-muted-foreground">{dateLabel}</span>
                 <div className="flex items-center gap-0.5">
-                  <button className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground">
+                  <button
+                    onClick={() => goDay(-1)}
+                    className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+                  >
                     <ChevronLeft size={14} />
                   </button>
-                  <button className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground">
+                  <button
+                    onClick={() => goDay(1)}
+                    className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+                  >
                     <ChevronRight size={14} />
                   </button>
                 </div>
-                <button className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground">
-                  <MoreHorizontal size={14} />
-                </button>
-              </div>
-            </div>
-            <div className="mt-3 space-y-1">
-              {mockMeetings.map((m) => (
-                <div
-                  key={m.id}
-                  className="flex items-center gap-3 rounded-md px-1 py-2 transition-colors hover:bg-muted/50"
-                >
-                  <div className={cn('size-2 rounded-full', m.color)} />
-                  <span className="flex-1 text-[13px] text-foreground/70">{m.title}</span>
-                  <span className="text-[12px] text-muted-foreground">{m.time}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Aufgaben — nur heute & überfällig */}
-          <div className="mt-10">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <h2 className="text-[15px] font-semibold text-foreground">Aufgaben</h2>
-                {badgeCount > 0 && (
-                  <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-medium text-red-600">
-                    {badgeCount}
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
                 <Link
-                  href="/tasks"
-                  className="text-[12px] text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  Alle anzeigen
-                </Link>
-                <Link
-                  href="/tasks"
+                  href="/calendar"
                   className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
                 >
-                  <Plus size={14} />
+                  <Calendar size={14} />
                 </Link>
               </div>
             </div>
             <div className="mt-3">
-              {todayTasks.length === 0 ? (
+              {timeline.length === 0 ? (
                 <p className="py-4 text-center text-[13px] text-muted-foreground/60">
-                  Keine Aufgaben für heute
+                  Keine Termine oder Aufgaben für diesen Tag
                 </p>
               ) : (
-                <div className="divide-y divide-border/60">
-                  {todayTasks.map((task) => (
-                    <TaskRow
-                      key={task.id}
-                      task={task as Task}
-                      onStatusChange={() => toggleDone(task as Task)}
-                      onEdit={() => openEditDialog(task as Task)}
-                      compact
-                    />
-                  ))}
+                <div className="space-y-0.5">
+                  {timeline.map((item) =>
+                    item.kind === 'event' ? (
+                      <div
+                        key={`ev-${item.event.id}`}
+                        className="flex items-center gap-3 rounded-md px-1 py-2 transition-colors hover:bg-muted/50"
+                      >
+                        <div className="size-2 shrink-0 rounded-full bg-blue-400" />
+                        <span className="flex-1 text-[13px] text-foreground/70">{item.event.title}</span>
+                        <div className="flex items-center gap-2">
+                          {item.event.location ? (
+                            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                              <MapPin size={10} />
+                              <span className="max-w-[100px] truncate">{item.event.location}</span>
+                            </span>
+                          ) : null}
+                          <span className="text-[12px] text-muted-foreground">
+                            {item.event.is_all_day
+                              ? 'Ganztägig'
+                              : `${fmtTime(new Date(item.event.start_at))} - ${fmtTime(new Date(item.event.end_at))}`}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <TaskRow
+                        key={`task-${item.task.id}`}
+                        task={item.task}
+                        onStatusChange={() => toggleDone(item.task)}
+                        onEdit={() => openEditDialog(item.task)}
+                        compact
+                      />
+                    ),
+                  )}
                 </div>
               )}
             </div>
           </div>
+
+          {/* Overdue / no-date tasks (only on "today" view) */}
+          {isToday ? (() => {
+            const undatedTasks = (activeTasks as Task[]).filter((t) => {
+              const isDone = t.status === 'done' || t.status === 'cancelled'
+              if (isDone) return false
+              return !t.due_at
+            })
+            if (undatedTasks.length === 0) return null
+            return (
+              <div className="mt-8">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-[15px] font-semibold text-foreground">Ohne Termin</h2>
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                      {undatedTasks.length}
+                    </span>
+                  </div>
+                  <Link
+                    href="/tasks"
+                    className="text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    Alle anzeigen
+                  </Link>
+                </div>
+                <div className="mt-3 divide-y divide-border/60">
+                  {undatedTasks.slice(0, 5).map((task) => (
+                    <TaskRow
+                      key={task.id}
+                      task={task}
+                      onStatusChange={() => toggleDone(task)}
+                      onEdit={() => openEditDialog(task)}
+                      compact
+                    />
+                  ))}
+                </div>
+              </div>
+            )
+          })() : null}
         </div>
       </div>
 
-      {/* Task Edit Dialog (gleicher wie im Aufgabenbereich) */}
       <TaskFormDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}

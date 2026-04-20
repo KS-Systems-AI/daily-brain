@@ -77,6 +77,9 @@ function stripDuration(text: string): string {
     .trim()
 }
 
+// Matches explicit times like "8 Uhr", "8:30 Uhr", "20:15 Uhr", "8.30 Uhr"
+const EXPLICIT_TIME_RE = /\b(\d{1,2})(?:[:\.](\d{2}))?\s*uhr\b/i
+
 export function parseTaskInput(text: string, refDate?: Date): ParsedTask {
   const ref = refDate ?? new Date()
   const results = chrono.de.parse(text, ref, { forwardDate: true })
@@ -88,6 +91,23 @@ export function parseTaskInput(text: string, refDate?: Date): ParsedTask {
   if (results.length > 0) {
     const result = results[0]
     due_at = result.start.date()
+
+    // If no explicit hour was mentioned (e.g. "morgen", "nächste Woche"),
+    // reset the time to midnight so we treat it as date-only.
+    if (!result.start.isCertain('hour')) {
+      due_at.setHours(0, 0, 0, 0)
+    } else {
+      // Enforce the exact hour the user said, e.g. "8 Uhr" → 08:00, "20 Uhr" → 20:00.
+      // chrono.de with forwardDate can sometimes drift the hour — we override it.
+      const explicitMatch = text.match(EXPLICIT_TIME_RE)
+      if (explicitMatch) {
+        const explicitHour = parseInt(explicitMatch[1], 10)
+        const explicitMin = explicitMatch[2] ? parseInt(explicitMatch[2], 10) : due_at.getMinutes()
+        if (explicitHour >= 0 && explicitHour <= 23) {
+          due_at.setHours(explicitHour, explicitMin, 0, 0)
+        }
+      }
+    }
 
     if (result.end) {
       end_at = result.end.date()
