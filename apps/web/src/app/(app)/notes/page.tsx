@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { Suspense } from 'react'
 import { NoteList } from '@/components/notes/note-list'
 
 export const metadata: Metadata = {
@@ -6,5 +7,9 @@ export const metadata: Metadata = {
 }
 
 export default function NotesPage(): React.JSX.Element {
-  return <NoteList />
+  return (
+    <Suspense>
+      <NoteList />
+    </Suspense>
+  )
 }
