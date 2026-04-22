@@ -1,9 +1,12 @@
 'use client'
 
-import { useEffect, useCallback, useState } from 'react'
+import { useEffect, useCallback, useState, useRef } from 'react'
 import { trpc } from '@/lib/trpc/provider'
 
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
+
+// Modul-Level-Flag: überlebt Re-Mounts, verhindert doppelte Registrierung
+let pushRegistrationDone = false
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
@@ -19,6 +22,10 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
 export function useWebPush() {
   const [permission, setPermission] = useState<NotificationPermission>('default')
   const registerToken = trpc.notifications.registerToken.useMutation()
+  // Verhindert, dass subscribe() mehrfach gleichzeitig läuft
+  const registeredRef = useRef(false)
+  const registerTokenRef = useRef(registerToken)
+  useEffect(() => { registerTokenRef.current = registerToken })
 
   useEffect(() => {
     if (typeof window !== 'undefined' && 'Notification' in window) {
@@ -39,10 +46,19 @@ export function useWebPush() {
       return false
     }
 
+    // Modul-Level-Guard: verhindert Loop über Re-Mounts hinweg
+    if (pushRegistrationDone) return true
+    if (registeredRef.current) return true
+    pushRegistrationDone = true
+    registeredRef.current = true
+
     try {
       const perm = await Notification.requestPermission()
       setPermission(perm)
-      if (perm !== 'granted') return false
+      if (perm !== 'granted') {
+        registeredRef.current = false
+        return false
+      }
 
       const registration = await navigator.serviceWorker.register('/sw.js')
       await navigator.serviceWorker.ready
@@ -57,7 +73,7 @@ export function useWebPush() {
 
       const sub = subscription.toJSON()
       if (sub.endpoint && sub.keys) {
-        await registerToken.mutateAsync({
+        await registerTokenRef.current.mutateAsync({
           token: sub.endpoint,
           platform: 'web',
           endpoint: sub.endpoint,
@@ -67,18 +83,18 @@ export function useWebPush() {
       }
       return true
     } catch (err) {
-      // Browsers/environments without a usable push backend can throw AbortError.
-      // This is non-fatal; keep the app running silently.
+      pushRegistrationDone = false
+      registeredRef.current = false
       if (err instanceof DOMException && err.name === 'AbortError') {
         return false
       }
       return false
     }
-  }, [registerToken])
+  }, []) // Keine Abhängigkeiten — registeredRef und registerTokenRef sind stabile Refs
 
   useEffect(() => {
     if (permission === 'granted' && VAPID_PUBLIC_KEY) {
-      subscribe()
+      void subscribe()
     }
   }, [permission, subscribe])
 

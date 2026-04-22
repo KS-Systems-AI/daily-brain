@@ -224,7 +224,7 @@ export async function listMicrosoftEventsDelta(
     let nextDeltaLink: string | null = null
 
     while (url) {
-      const res = await client.api(url).get() as {
+      const res = await client.api(url).header('Prefer', 'deltashowremoved').get() as {
         value: GraphEvent[]
         '@odata.nextLink'?: string
         '@odata.deltaLink'?: string

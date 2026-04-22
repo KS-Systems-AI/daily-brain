@@ -48,6 +48,7 @@ export async function middleware(request: NextRequest) {
     '/api/calendar/google/callback',
     '/api/calendar/microsoft/callback',
     '/api/calendar/sync',
+    '/api/notes/create-from-voice',
   ]
   const isPublic = publicPaths.some((p) => pathname.startsWith(p))
 

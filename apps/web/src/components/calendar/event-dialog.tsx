@@ -5,6 +5,7 @@ import { trpc } from '@/lib/trpc/provider'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -189,6 +190,9 @@ export function EventDialog({
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>{isEdit ? 'Termin bearbeiten' : 'Neuer Termin'}</DialogTitle>
+            <DialogDescription className="sr-only">
+              Kalendertermin {isEdit ? 'bearbeiten' : 'erstellen'}.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">

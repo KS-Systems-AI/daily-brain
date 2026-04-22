@@ -24,6 +24,25 @@ export type NormalizedEvent = {
 }
 
 export function mapGoogleEvent(event: calendar_v3.Schema$Event): NormalizedEvent {
+  // Delta sync returns cancelled events with only id + status, no start/end
+  if (event.status === 'cancelled' && !event.start) {
+    return {
+      external_id: event.id!,
+      title: '',
+      description: null,
+      location: null,
+      start_at: new Date(0),
+      end_at: new Date(0),
+      is_all_day: false,
+      attendees: [],
+      organizer_email: null,
+      status: 'cancelled',
+      recurrence_rule: null,
+      recurring_event_id: event.recurringEventId ?? null,
+      original_start_at: null,
+    }
+  }
+
   const isAllDay = Boolean(event.start?.date && !event.start?.dateTime)
 
   const startAt = isAllDay
@@ -72,6 +91,26 @@ export function mapGoogleEvent(event: calendar_v3.Schema$Event): NormalizedEvent
 }
 
 export function mapMicrosoftEvent(event: GraphEvent): NormalizedEvent {
+  // Delta sync marks deleted events with @removed instead of isCancelled
+  const isRemoved = '@removed' in (event as Record<string, unknown>)
+  if (isRemoved || (event.isCancelled && !event.start)) {
+    return {
+      external_id: event.id!,
+      title: '',
+      description: null,
+      location: null,
+      start_at: new Date(0),
+      end_at: new Date(0),
+      is_all_day: false,
+      attendees: [],
+      organizer_email: null,
+      status: 'cancelled',
+      recurrence_rule: null,
+      recurring_event_id: event.seriesMasterId ?? null,
+      original_start_at: null,
+    }
+  }
+
   const isAllDay = event.isAllDay ?? false
 
   const startAt = isAllDay

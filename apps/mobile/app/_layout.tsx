@@ -24,6 +24,7 @@ const queryClient = new QueryClient({
 })
 
 function routeForDeepLink(url: string): string | null {
+  if (url.includes('note/voice')) return '/note/voice'
   if (url.includes('task/voice')) return '/task/voice'
   if (url.includes('task/new')) return '/task/new'
   if (url.includes('notifications')) return '/(tabs)/dashboard'
@@ -85,6 +86,12 @@ export default function RootLayout() {
   const checkPendingAction = useCallback(() => {
     if (Platform.OS !== 'ios' || !getSharedData || !removeSharedData) return
     try {
+      const voiceNote = getSharedData('pending_voice_note')
+      if (voiceNote === 'voice_note') {
+        removeSharedData('pending_voice_note')
+        navigateDeepLink('/note/voice')
+        return
+      }
       const action = getSharedData('pending_action')
       if (action === 'voice') {
         removeSharedData('pending_action')
@@ -137,6 +144,7 @@ export default function RootLayout() {
           <Stack.Screen name="task/[id]" />
           <Stack.Screen name="task/new" />
           <Stack.Screen name="task/voice" />
+          <Stack.Screen name="note/voice" />
         </Stack>
         {Platform.OS === 'ios' && <SiriSyncProvider />}
         <StatusBar style="auto" />

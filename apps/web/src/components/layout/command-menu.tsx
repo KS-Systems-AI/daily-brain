@@ -21,6 +21,7 @@ import {
   Briefcase,
   Settings,
   Search,
+  Mic,
 } from 'lucide-react'
 
 interface CommandMenuProps {
@@ -28,9 +29,10 @@ interface CommandMenuProps {
   onOpenChange: (open: boolean) => void
   onCreateTask: () => void
   onCreateContact: () => void
+  onVoiceNote: () => void
 }
 
-export function CommandMenu({ open, onOpenChange, onCreateTask, onCreateContact }: CommandMenuProps) {
+export function CommandMenu({ open, onOpenChange, onCreateTask, onCreateContact, onVoiceNote }: CommandMenuProps) {
   const router = useRouter()
 
   const runAction = useCallback((fn: () => void) => {
@@ -56,6 +58,10 @@ export function CommandMenu({ open, onOpenChange, onCreateTask, onCreateContact 
           <CommandItem onSelect={() => runAction(() => router.push('/notes'))}>
             <FileText className="text-blue-500" />
             <span>Neue Notiz</span>
+          </CommandItem>
+          <CommandItem onSelect={() => runAction(onVoiceNote)}>
+            <Mic className="text-orange-500" />
+            <span>Sprachnotiz aufnehmen</span>
           </CommandItem>
         </CommandGroup>
 

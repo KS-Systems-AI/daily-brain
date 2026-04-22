@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 
 export type RecurringMode = 'THIS' | 'THIS_AND_FOLLOWING' | 'ALL'
@@ -29,6 +29,9 @@ export function RecurringEditDialog({ open, eventTitle, onConfirm, onCancel }: P
           <DialogTitle className="text-base font-semibold">
             Serientermin „{eventTitle}" bearbeiten
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            Wähle, welche Termine der Serie bearbeitet werden sollen.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-2 py-2">

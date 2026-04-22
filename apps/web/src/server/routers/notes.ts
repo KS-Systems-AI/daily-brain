@@ -10,6 +10,7 @@ import {
   midSortOrder,
   type NoteBlockData,
 } from '@/lib/block-converter'
+import { formatVoiceTranscript } from '../lib/voice-formatter'
 
 const styleSpanSchema = z.object({
   start: z.number(),
@@ -604,6 +605,61 @@ export const notesRouter = createTRPCRouter({
       }
 
       return { success: true }
+    }),
+
+  createFromVoice: protectedProcedure
+    .input(
+      z.object({
+        transcript: z.string().min(1).max(10000),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      console.log(`[createFromVoice] User=${ctx.userId} Workspace=${ctx.workspaceId} Transkript-Länge=${input.transcript.length}`)
+
+      const { title, tiptapDoc, plainText } = await formatVoiceTranscript(input.transcript)
+
+      console.log(`[createFromVoice] Formatierung OK — Titel="${title}"`)
+
+      const note = await ctx.prisma.note.create({
+        data: {
+          workspace_id: ctx.workspaceId!,
+          author_id: ctx.userId!,
+          title,
+          content: tiptapDoc as Prisma.InputJsonValue,
+          content_text: plainText,
+        },
+      })
+
+      const newBlocks = tiptapJsonToBlocks(tiptapDoc as unknown as Parameters<typeof tiptapJsonToBlocks>[0])
+
+      if (newBlocks.length > 0) {
+        await ctx.prisma.noteBlock.createMany({
+          data: newBlocks.map((b) => ({
+            id: b.id,
+            note_id: note.id,
+            block_type: b.block_type,
+            plaintext: b.plaintext,
+            styles: b.styles as unknown as Prisma.InputJsonValue,
+            sort_order: b.sort_order,
+            indent: b.indent,
+            attrs: b.attrs as Prisma.InputJsonValue,
+          })),
+        })
+      } else {
+        await ctx.prisma.noteBlock.create({
+          data: {
+            note_id: note.id,
+            block_type: 'unstyled',
+            plaintext: '',
+            styles: [],
+            sort_order: generateSortOrder(0, 1),
+            indent: 0,
+            attrs: {},
+          },
+        })
+      }
+
+      return { noteId: note.id, title }
     }),
 
   reorderBlock: protectedProcedure
