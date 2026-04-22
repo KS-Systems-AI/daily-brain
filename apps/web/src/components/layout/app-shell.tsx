@@ -27,6 +27,7 @@ import {
   UserPlus,
   LogOut,
   Command,
+  Wallet,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState, useMemo, useEffect } from 'react'
@@ -40,6 +41,7 @@ import { useWebPush } from '@/hooks/use-web-push'
 import { CommandMenu } from './command-menu'
 import { ContactFormSheet } from '@/components/contacts/contact-form-sheet'
 import { TaskFormDialog } from '@/components/tasks/task-form-dialog'
+import { VoiceNoteRecorder } from '@/components/voice/voice-note-recorder'
 
 const mainNav = [
   { href: '/dashboard', label: 'Start', icon: Home },
@@ -47,6 +49,7 @@ const mainNav = [
   { href: '/calendar', label: 'Kalender', icon: CalendarDays },
   { href: '/tasks', label: 'Aufgaben', icon: CheckSquare, badge: true },
   { href: '/notes', label: 'Notizen', icon: FileText },
+  { href: '/budget', label: 'Haushaltsbuch', icon: Wallet },
   { href: '/emails', label: 'E-Mails', icon: Mail },
   { href: '/calls', label: 'Anrufe', icon: Phone },
   { href: '/reports', label: 'Berichte', icon: BarChart3 },
@@ -85,6 +88,7 @@ export function AppShell({ children }: { children: React.ReactNode }): React.JSX
   const [cmdOpen, setCmdOpen] = useState(false)
   const [contactDialogOpen, setContactDialogOpen] = useState(false)
   const [taskDialogOpen, setTaskDialogOpen] = useState(false)
+  const [voiceNoteOpen, setVoiceNoteOpen] = useState(false)
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -333,6 +337,7 @@ export function AppShell({ children }: { children: React.ReactNode }): React.JSX
         onOpenChange={setCmdOpen}
         onCreateTask={() => setTaskDialogOpen(true)}
         onCreateContact={() => setContactDialogOpen(true)}
+        onVoiceNote={() => setVoiceNoteOpen(true)}
       />
 
       {/* Aufgabe erstellen Dialog (gleicher wie im Aufgabenbereich) */}
@@ -347,6 +352,9 @@ export function AppShell({ children }: { children: React.ReactNode }): React.JSX
         onOpenChange={setContactDialogOpen}
         mode="create"
       />
+
+      {/* Sprachnotiz */}
+      <VoiceNoteRecorder open={voiceNoteOpen} onOpenChange={setVoiceNoteOpen} />
     </div>
   )
 }

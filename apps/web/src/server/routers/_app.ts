@@ -1,5 +1,6 @@
 import { createTRPCRouter } from '../trpc'
 import { attachmentsRouter } from './attachments'
+import { budgetRouter } from './budget'
 import { calendarRouter } from './calendar'
 import { companiesRouter } from './companies'
 import { contactsRouter } from './contacts'
@@ -9,6 +10,7 @@ import { tasksRouter } from './tasks'
 
 export const appRouter = createTRPCRouter({
   attachments: attachmentsRouter,
+  budget: budgetRouter,
   calendar: calendarRouter,
   contacts: contactsRouter,
   companies: companiesRouter,

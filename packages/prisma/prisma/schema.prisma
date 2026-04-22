@@ -43,8 +43,11 @@ model Workspace {
   views            View[]
   notifications    Notification[]
   attachments      Attachment[]
-  calendarAccounts CalendarAccount[]
-  calendarEvents   CalendarEvent[]
+  calendarAccounts   CalendarAccount[]
+  calendarEvents     CalendarEvent[]
+  budgetCategories   BudgetCategory[]
+  budgetTransactions BudgetTransaction[]
+  budgetRules        BudgetRule[]
 
   @@map("workspaces")
 }
@@ -730,4 +733,74 @@ model CalendarEventLink {
   @@index([workspace_id, record_type, record_id])
   @@index([event_id])
   @@map("calendar_event_links")
+}
+
+// ─────────────────────────────────────────────────
+// BUDGET / HAUSHALTSBUCH
+// ─────────────────────────────────────────────────
+
+model BudgetCategory {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  name         String    @db.VarChar(100)
+  type         String    @db.VarChar(20)  // "fixed" | "variable" | "income" | "transfer"
+  color        String?   @db.VarChar(20)
+  icon         String?   @db.VarChar(50)
+  is_system    Boolean   @default(false)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at   DateTime? @db.Timestamptz(6)
+
+  workspace    Workspace           @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  transactions BudgetTransaction[]
+  rules        BudgetRule[]
+
+  @@index([workspace_id])
+  @@map("budget_categories")
+}
+
+model BudgetTransaction {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  category_id  String?   @db.Uuid
+  date         DateTime  @db.Timestamptz(6)
+  amount       Int       // cents; negative = expense, positive = income
+  recipient    String?   @db.VarChar(255)
+  sender       String?   @db.VarChar(255)
+  subject      String?   @db.Text
+  iban         String?   @db.VarChar(34)
+  raw_data     Json      @default("{}")
+  is_transfer  Boolean   @default(false)
+  notes        String?   @db.Text
+  source_file  String?   @db.VarChar(255)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at   DateTime? @db.Timestamptz(6)
+
+  workspace Workspace       @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  category  BudgetCategory? @relation(fields: [category_id], references: [id], onDelete: SetNull)
+
+  @@index([workspace_id])
+  @@index([workspace_id, date])
+  @@map("budget_transactions")
+}
+
+model BudgetRule {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  category_id  String    @db.Uuid
+  match_field  String    @db.VarChar(20)  // "recipient" | "sender" | "subject" | "any"
+  match_value  String    @db.VarChar(500)
+  match_type   String    @default("contains") @db.VarChar(20) // "contains" | "exact" | "startswith"
+  priority     Int       @default(0)
+  is_system    Boolean   @default(false)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deleted_at   DateTime? @db.Timestamptz(6)
+
+  workspace Workspace      @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  category  BudgetCategory @relation(fields: [category_id], references: [id], onDelete: Cascade)
+
+  @@index([workspace_id])
+  @@map("budget_rules")
 }
