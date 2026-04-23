@@ -769,6 +769,7 @@ model BudgetTransaction {
   sender       String?   @db.VarChar(255)
   subject      String?   @db.Text
   iban         String?   @db.VarChar(34)
+  import_hash  String?   @db.VarChar(64)
   raw_data     Json      @default("{}")
   is_transfer  Boolean   @default(false)
   notes        String?   @db.Text
@@ -780,6 +781,7 @@ model BudgetTransaction {
   workspace Workspace       @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
   category  BudgetCategory? @relation(fields: [category_id], references: [id], onDelete: SetNull)
 
+  @@unique([workspace_id, import_hash])
   @@index([workspace_id])
   @@index([workspace_id, date])
   @@map("budget_transactions")

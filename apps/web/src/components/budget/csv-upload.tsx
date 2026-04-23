@@ -8,6 +8,7 @@ import { trpc } from '@/lib/trpc/provider'
 
 type UploadResult = {
   imported: number
+  skipped: number
   categorized: number
   transfers: number
   uncategorized: number
@@ -102,7 +103,10 @@ export function CsvUpload({ onSuccess }: { onSuccess: () => void }): React.JSX.E
         <div className="rounded-md bg-green-50 p-3">
           <div className="flex items-center gap-2 text-sm font-medium text-green-800">
             <CheckCircle2 size={14} />
-            {result.imported} Buchungen importiert
+            {result.imported} neue Buchungen importiert
+            {result.skipped > 0 && (
+              <span className="ml-1 font-normal text-green-600">· {result.skipped} Duplikate übersprungen</span>
+            )}
           </div>
           <div className="mt-1 grid grid-cols-3 gap-2 text-xs text-green-700">
             <span>Auto-kategorisiert: {result.categorized}</span>

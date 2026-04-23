@@ -1,9 +1,27 @@
+import { createHash } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { prisma } from '@/lib/prisma'
 import { parseCSV } from '@/server/lib/budget/csv-parser'
 import { applyRules, detectTransfer } from '@/server/lib/budget/rule-engine'
 import { SEED_CATEGORIES, SEED_RULES } from '@/server/lib/budget/seed-data'
+
+function computeImportHash(tx: {
+  date: Date
+  amount: number
+  recipient: string | null
+  subject: string | null
+  iban: string | null
+}): string {
+  const key = [
+    tx.date.toISOString().split('T')[0],
+    tx.amount.toString(),
+    tx.recipient ?? '',
+    tx.subject ?? '',
+    tx.iban ?? '',
+  ].join('|')
+  return createHash('sha256').update(key).digest('hex')
+}
 
 async function ensureSeedData(workspaceId: string): Promise<void> {
   const count = await prisma.budgetCategory.count({
@@ -78,9 +96,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         { recipient: tx.recipient, sender: tx.sender, subject: tx.subject },
         rules,
       )
-      if (cat) {
-        categoryId = cat.id
-      }
+      if (cat) categoryId = cat.id
     }
 
     return {
@@ -92,19 +108,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       sender: tx.sender,
       subject: tx.subject,
       iban: tx.iban,
+      import_hash: computeImportHash({ date: tx.date, amount: tx.amount, recipient: tx.recipient, subject: tx.subject, iban: tx.iban }),
       raw_data: tx.rawData as object,
       is_transfer: isTransfer,
       source_file: file.name,
     }
   })
 
-  await prisma.budgetTransaction.createMany({ data })
+  const before = await prisma.budgetTransaction.count({ where: { workspace_id: workspaceId, deleted_at: null } })
+  await prisma.budgetTransaction.createMany({ data, skipDuplicates: true })
+  const after = await prisma.budgetTransaction.count({ where: { workspace_id: workspaceId, deleted_at: null } })
 
+  const imported = after - before
+  const skipped = data.length - imported
   const categorized = data.filter((d) => d.category_id !== null).length
   const transfers = data.filter((d) => d.is_transfer).length
 
   return NextResponse.json({
-    imported: data.length,
+    imported,
+    skipped,
     categorized,
     transfers,
     uncategorized: data.length - categorized - transfers,
