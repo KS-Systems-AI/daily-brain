@@ -769,9 +769,10 @@ model BudgetTransaction {
   sender       String?   @db.VarChar(255)
   subject      String?   @db.Text
   iban         String?   @db.VarChar(34)
-  import_hash  String?   @db.VarChar(64)
-  raw_data     Json      @default("{}")
-  is_transfer  Boolean   @default(false)
+  import_hash      String?   @db.VarChar(64)
+  billing_interval String    @default("monthly") @db.VarChar(20) // "monthly" | "quarterly" | "biannual" | "annual"
+  raw_data         Json      @default("{}")
+  is_transfer      Boolean   @default(false)
   notes        String?   @db.Text
   source_file  String?   @db.VarChar(255)
   created_at   DateTime  @default(now()) @db.Timestamptz(6)

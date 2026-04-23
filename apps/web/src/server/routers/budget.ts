@@ -127,6 +127,13 @@ async function runMigrations(prisma: PrismaClient, workspaceId: string): Promise
   await prisma.budgetRule.createMany({ data: newRules, skipDuplicates: true })
 }
 
+const INTERVAL_MONTHS: Record<string, number> = {
+  monthly: 1,
+  quarterly: 3,
+  biannual: 6,
+  annual: 12,
+}
+
 export const budgetRouter = createTRPCRouter({
   // ── Categories ──────────────────────────────────────────
 
@@ -242,6 +249,7 @@ export const budgetRouter = createTRPCRouter({
       categoryId: z.string().uuid().nullable().optional(),
       isTransfer: z.boolean().optional(),
       notes: z.string().optional(),
+      billingInterval: z.enum(['monthly', 'quarterly', 'biannual', 'annual']).optional(),
       applyToSimilar: z.boolean().default(false),
       targetIds: z.array(z.string().uuid()).optional(), // explicit IDs to update (empty = none, undefined = all similar)
     }))
@@ -266,6 +274,7 @@ export const budgetRouter = createTRPCRouter({
           ...(input.categoryId !== undefined ? { category_id: input.categoryId } : {}),
           ...(isTransfer !== undefined ? { is_transfer: isTransfer } : {}),
           ...(input.notes !== undefined ? { notes: input.notes } : {}),
+          ...(input.billingInterval !== undefined ? { billing_interval: input.billingInterval } : {}),
         },
         include: { category: true },
       })
@@ -354,10 +363,11 @@ export const budgetRouter = createTRPCRouter({
         include: { category: true },
       })
 
-      // Net per category: refunds/returns in an expense category reduce that category's total
+      // Net per category: refunds/returns in an expense category reduce that category's total.
+      // For fixed-type transactions, use billing_interval to compute the monthly-normalized net.
       const netByCategory = transactions
         .filter((t) => t.category)
-        .reduce<Record<string, { name: string; color: string; type: string; net: number }>>(
+        .reduce<Record<string, { name: string; color: string; type: string; net: number; normalizedNet: number }>>(
           (acc, t) => {
             const catId = t.category_id!
             if (!acc[catId]) {
@@ -366,9 +376,14 @@ export const budgetRouter = createTRPCRouter({
                 color: t.category!.color ?? '#94a3b8',
                 type: t.category!.type,
                 net: 0,
+                normalizedNet: 0,
               }
             }
+            const factor = t.category!.type === 'fixed'
+              ? (INTERVAL_MONTHS[t.billing_interval] ?? 1)
+              : 1
             acc[catId].net += t.amount
+            acc[catId].normalizedNet += t.amount / factor
             return acc
           },
           {}
@@ -390,23 +405,33 @@ export const budgetRouter = createTRPCRouter({
         .filter((c) => c.type === 'fixed' && c.net < 0)
         .reduce((sum, c) => sum + Math.abs(c.net), 0)
 
+      const fixedExpensesNormalized = Object.values(netByCategory)
+        .filter((c) => c.type === 'fixed' && c.normalizedNet < 0)
+        .reduce((sum, c) => sum + Math.abs(c.normalizedNet), 0)
+
       const variableExpenses = Object.values(netByCategory)
         .filter((c) => c.type === 'variable' && c.net < 0)
         .reduce((sum, c) => sum + Math.abs(c.net), 0)
 
       const uncategorized = transactions.filter((t) => !t.category_id).length
 
-      // byCategory includes ALL categories (income + expense), sorted by absolute amount
+      // byCategory includes ALL categories (income + expense), sorted by absolute amount.
+      // Fixed categories use normalizedNet (interval-adjusted); others use raw net.
       const byCategory = Object.entries(netByCategory)
-        .map(([id, c]) => ({
-          id,
-          name: c.name,
-          color: c.color,
-          type: c.type,
-          // For expense categories: show abs(net) so 0 means fully offset by refunds
-          // For income categories: show positive net
-          total: c.type === 'income' ? Math.max(0, c.net) : Math.abs(Math.min(0, c.net)),
-        }))
+        .map(([id, c]) => {
+          const rawTotal = c.type === 'income' ? Math.max(0, c.net) : Math.abs(Math.min(0, c.net))
+          const total = c.type === 'fixed'
+            ? Math.abs(Math.min(0, c.normalizedNet))
+            : rawTotal
+          return {
+            id,
+            name: c.name,
+            color: c.color,
+            type: c.type,
+            total,
+            actualTotal: rawTotal,
+          }
+        })
         .filter((c) => c.total > 0)
         .sort((a, b) => b.total - a.total)
 
@@ -414,6 +439,7 @@ export const budgetRouter = createTRPCRouter({
         totalExpenses,
         totalIncome,
         fixedExpenses,
+        fixedExpensesNormalized: Math.round(fixedExpensesNormalized),
         variableExpenses,
         uncategorized,
         byCategory,
@@ -446,7 +472,9 @@ export const budgetRouter = createTRPCRouter({
           monthMap[key].income += tx.amount
         } else {
           monthMap[key].expenses += Math.abs(tx.amount)
-          if (tx.category?.type === 'fixed') monthMap[key].fixed += Math.abs(tx.amount)
+          if (tx.category?.type === 'fixed') {
+            monthMap[key].fixed += Math.abs(tx.amount) / (INTERVAL_MONTHS[tx.billing_interval] ?? 1)
+          }
           if (tx.category?.type === 'variable') monthMap[key].variable += Math.abs(tx.amount)
         }
       }

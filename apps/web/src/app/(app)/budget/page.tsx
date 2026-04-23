@@ -28,6 +28,7 @@ function formatCents(cents: number): string {
   return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(cents / 100)
 }
 
+
 type Tab = 'dashboard' | 'transactions' | 'transfers' | 'categories'
 
 export default function BudgetPage(): React.JSX.Element {
@@ -136,7 +137,13 @@ export default function BudgetPage(): React.JSX.Element {
               <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
                 <StatCard label="Einnahmen" value={formatCents(stats.totalIncome)} icon={<TrendingUp size={16} />} color="text-green-600" />
                 <StatCard label="Ausgaben gesamt" value={formatCents(stats.totalExpenses)} icon={<TrendingDown size={16} />} color="text-red-500" />
-                <StatCard label="Fixkosten" value={formatCents(stats.fixedExpenses)} icon={<Tag size={16} />} color="text-violet-500" />
+                <StatCard
+                  label="Fixkosten"
+                  value={formatCents(stats.fixedExpensesNormalized)}
+                  icon={<Tag size={16} />}
+                  color="text-violet-500"
+                  note={stats.fixedExpensesNormalized !== stats.fixedExpenses ? 'Ø/Monat' : undefined}
+                />
                 <StatCard label="Variable Ausgaben" value={formatCents(stats.variableExpenses)} icon={<Tag size={16} />} color="text-orange-500" />
               </div>
             ) : null}
@@ -238,12 +245,19 @@ export default function BudgetPage(): React.JSX.Element {
                                   <div className="h-full rounded-full" style={{ width: `${Math.min(pct, 100)}%`, backgroundColor: cat.color }} />
                                 </div>
                                 <span className="w-8 text-right text-xs text-muted-foreground">{Math.round(pct)}%</span>
-                                <span className={cn(
-                                  'w-24 text-right text-sm font-medium tabular-nums',
-                                  type === 'income' ? 'text-green-600' : 'text-foreground',
-                                )}>
-                                  {type === 'income' ? '+' : ''}{formatCents(cat.total)}
-                                </span>
+                                <div className="w-28 text-right">
+                                  <span className={cn(
+                                    'text-sm font-medium tabular-nums',
+                                    type === 'income' ? 'text-green-600' : 'text-foreground',
+                                  )}>
+                                    {type === 'income' ? '+' : ''}{formatCents(cat.total)}
+                                  </span>
+                                  {cat.type === 'fixed' && cat.actualTotal !== cat.total && (
+                                    <p className="text-[10px] text-muted-foreground">
+                                      von {formatCents(cat.actualTotal)}
+                                    </p>
+                                  )}
+                                </div>
                               </div>
                             </button>
                           )
@@ -361,17 +375,24 @@ function StatCard({
   value,
   icon,
   color,
+  note,
 }: {
   label: string
   value: string
   icon: React.ReactNode
   color: string
+  note?: string
 }): React.JSX.Element {
   return (
     <div className="rounded-xl border border-border bg-card p-4">
       <div className={cn('mb-2 flex items-center gap-1.5 text-xs font-medium', color)}>
         {icon}
         {label}
+        {note && (
+          <span className="ml-auto rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+            {note}
+          </span>
+        )}
       </div>
       <p className="text-2xl font-bold tabular-nums">{value}</p>
     </div>

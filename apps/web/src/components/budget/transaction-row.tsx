@@ -14,6 +14,21 @@ type RouterOutputs = inferRouterOutputs<AppRouter>
 type Transaction = RouterOutputs['budget']['listTransactions'][number]
 type Category = RouterOutputs['budget']['listCategories'][number]
 
+type BillingInterval = 'monthly' | 'quarterly' | 'biannual' | 'annual'
+
+const INTERVAL_OPTIONS: { value: BillingInterval; label: string }[] = [
+  { value: 'monthly', label: 'Monatlich' },
+  { value: 'quarterly', label: 'Vierteljährlich' },
+  { value: 'biannual', label: 'Halbjährlich' },
+  { value: 'annual', label: 'Jährlich' },
+]
+
+const INTERVAL_LABELS: Record<string, string> = {
+  quarterly: 'Quartal',
+  biannual: 'Halbjahr',
+  annual: 'Jährlich',
+}
+
 type Props = {
   transaction: Transaction
   categories: Category[]
@@ -32,6 +47,12 @@ export function TransactionRow({ transaction: tx, categories }: Props): React.JS
   const utils = trpc.useUtils()
   const [pending, setPending] = useState<PendingChange | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [showIntervalPicker, setShowIntervalPicker] = useState(false)
+  const [localInterval, setLocalInterval] = useState<BillingInterval>(
+    (tx.billing_interval as BillingInterval | undefined) ?? 'monthly'
+  )
+
+  const isFixed = tx.category?.type === 'fixed'
 
   const similarQuery = trpc.budget.listSimilarTransactions.useQuery(
     { id: tx.id },
@@ -70,6 +91,12 @@ export function TransactionRow({ transaction: tx, categories }: Props): React.JS
     setPending(null)
   }
 
+  function handleIntervalChange(interval: BillingInterval): void {
+    setLocalInterval(interval)
+    setShowIntervalPicker(false)
+    update.mutate({ id: tx.id, billingInterval: interval })
+  }
+
   return (
     <>
       <div className={cn(
@@ -89,6 +116,38 @@ export function TransactionRow({ transaction: tx, categories }: Props): React.JS
         </div>
 
         <div className="flex items-center gap-2">
+          {isFixed && (
+            <div className="relative">
+              <button
+                onClick={() => setShowIntervalPicker((v) => !v)}
+                className={cn(
+                  'rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors',
+                  localInterval === 'monthly'
+                    ? 'bg-muted text-muted-foreground hover:bg-muted/80'
+                    : 'bg-violet-100 text-violet-600 hover:bg-violet-200 dark:bg-violet-900/30 dark:text-violet-400',
+                )}
+              >
+                {localInterval === 'monthly' ? 'Monatl.' : INTERVAL_LABELS[localInterval]}
+              </button>
+              {showIntervalPicker && (
+                <div className="absolute right-0 top-full z-10 mt-1 w-40 rounded-md border border-border bg-popover shadow-md">
+                  {INTERVAL_OPTIONS.map((o) => (
+                    <button
+                      key={o.value}
+                      onClick={() => handleIntervalChange(o.value)}
+                      className={cn(
+                        'w-full px-3 py-1.5 text-left text-xs hover:bg-muted',
+                        localInterval === o.value && 'font-medium text-primary',
+                      )}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           <CategoryPicker
             categories={categories}
             value={tx.category ?? null}
