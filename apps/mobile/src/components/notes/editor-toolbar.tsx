@@ -12,6 +12,7 @@ import { BLOCK_TYPES, type TextMarkKey } from '@/lib/tiptap-blocks'
 interface EditorToolbarProps {
   activeBlockType: string
   activeAttrs: Record<string, unknown>
+  activeMarks?: Record<TextMarkKey, boolean>
   onChangeBlockType: (type: string, attrs?: Record<string, unknown>) => void
   onInsertBlock: (type: string, attrs?: Record<string, unknown>) => void
   onOpenBlockMenu?: () => void
@@ -23,6 +24,7 @@ interface EditorToolbarProps {
 export function EditorToolbar({
   activeBlockType,
   activeAttrs,
+  activeMarks,
   onChangeBlockType,
   onInsertBlock,
   onOpenBlockMenu,
@@ -52,22 +54,22 @@ export function EditorToolbar({
               <Sep />
               <PillBtn
                 label="B"
-                active={!!activeAttrs.bold}
+                active={activeMarks?.bold ?? !!activeAttrs.bold}
                 onPress={() => onToggleTextMark('bold')}
               />
               <PillBtn
                 label="I"
-                active={!!activeAttrs.italic}
+                active={activeMarks?.italic ?? !!activeAttrs.italic}
                 onPress={() => onToggleTextMark('italic')}
               />
               <PillBtn
                 label="U"
-                active={!!activeAttrs.underline}
+                active={activeMarks?.underline ?? !!activeAttrs.underline}
                 onPress={() => onToggleTextMark('underline')}
               />
               <PillBtn
                 label="S"
-                active={!!activeAttrs.strike}
+                active={activeMarks?.strike ?? !!activeAttrs.strike}
                 onPress={() => onToggleTextMark('strike')}
               />
             </>

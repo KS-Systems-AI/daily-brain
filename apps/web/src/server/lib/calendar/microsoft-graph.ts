@@ -16,7 +16,7 @@ function getMsalApp(): ConfidentialClientApplication {
   })
 }
 
-async function refreshMicrosoftToken(account: CalendarAccount): Promise<CalendarAccount> {
+export async function refreshMicrosoftToken(account: CalendarAccount): Promise<CalendarAccount> {
   if (!account.expires_at || account.expires_at.getTime() > Date.now() + 60_000) {
     return account
   }

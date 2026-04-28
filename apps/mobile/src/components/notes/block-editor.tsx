@@ -12,6 +12,7 @@ import {
   Dimensions,
   type NativeSyntheticEvent,
   type TextInputKeyPressEventData,
+  type TextInputSelectionChangeEventData,
 } from 'react-native'
 
 const _screenHeight = Dimensions.get('window').height
@@ -20,12 +21,17 @@ import { EditorToolbar, BlockTypeMenu } from './editor-toolbar'
 import {
   type EditorBlock,
   type TextMarkKey,
+  type MarkRange,
   tiptapToBlocks,
   blocksToTiptap,
   emptyBlock,
   uid,
   blockSupportsTextMarks,
-  copyTextMarks,
+  toggleMarkInRange,
+  adjustMarkRangesForEdit,
+  getActiveMarksAtSelection,
+  buildStyledSegments,
+  getCurrentWordRange,
 } from '@/lib/tiptap-blocks'
 
 interface BlockEditorProps {
@@ -37,12 +43,17 @@ interface BlockEditorProps {
   childNotes?: { id: string; title: string | null }[]
 }
 
-export function BlockEditor({ initialContent, onSave, onSubNotePress, onSubNoteLongPress, onCreateSubNote, childNotes }: BlockEditorProps) {
+export function BlockEditor({
+  initialContent,
+  onSave,
+  onSubNotePress,
+  onSubNoteLongPress,
+  onCreateSubNote,
+  childNotes,
+}: BlockEditorProps) {
   const [blocks, setBlocks] = useState<EditorBlock[]>(() => {
     if (initialContent) {
       const parsed = tiptapToBlocks(initialContent as any)
-      // Only filter when parent passed a resolved list; `undefined` = still loading,
-      // do not treat that like "no children" (empty array would remove every sub_note).
       if (childNotes !== undefined) {
         const validIds = new Set(childNotes.map((c) => c.id))
         return parsed.filter(
@@ -55,6 +66,13 @@ export function BlockEditor({ initialContent, onSave, onSubNotePress, onSubNoteL
   })
   const [focusedIndex, setFocusedIndex] = useState<number>(0)
   const [showBlockMenu, setShowBlockMenu] = useState(false)
+  const [activeMarks, setActiveMarks] = useState<Record<TextMarkKey, boolean>>({
+    bold: false,
+    italic: false,
+    underline: false,
+    strike: false,
+  })
+
   const inputRefs = useRef<(TextInput | null)[]>([])
   const blockRowRefs = useRef<(View | null)[]>([])
   const scrollRef = useRef<ScrollView>(null)
@@ -63,6 +81,9 @@ export function BlockEditor({ initialContent, onSave, onSubNotePress, onSubNoteL
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const blocksRef = useRef(blocks)
   blocksRef.current = blocks
+  const selectionRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 })
+  const focusedIndexRef = useRef(focusedIndex)
+  focusedIndexRef.current = focusedIndex
 
   const scheduleSave = useCallback(() => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
@@ -82,72 +103,144 @@ export function BlockEditor({ initialContent, onSave, onSubNotePress, onSubNoteL
     }
   }, [onSave])
 
+  const scrollBlockIntoView = useCallback((index: number) => {
+    const row = blockRowRefs.current[index]
+    if (!row) return
+
+    requestAnimationFrame(() => {
+      row.measureInWindow((_x, y, _w, h) => {
+        const kbH = keyboardHeightRef.current
+        if (kbH === 0) return
+        const toolbarH = 46
+        const visibleBottom = _screenHeight - kbH - toolbarH
+        const blockBottom = y + h
+
+        if (blockBottom > visibleBottom) {
+          const overflowBy = blockBottom - visibleBottom + 40
+          scrollRef.current?.scrollTo({
+            y: (scrollOffsetRef.current ?? 0) + overflowBy,
+            animated: true,
+          })
+        }
+      })
+    })
+  }, [])
+
+  const handleSelectionChange = useCallback(
+    (index: number, sel: { start: number; end: number }) => {
+      selectionRef.current = sel
+      const block = blocksRef.current[index]
+      if (block && blockSupportsTextMarks(block.block_type)) {
+        setActiveMarks(
+          getActiveMarksAtSelection(block.markRanges, block.plaintext, sel.start, sel.end),
+        )
+      }
+    },
+    [],
+  )
+
   const handleTextChange = useCallback(
     (index: number, text: string) => {
-      const blockType = blocksRef.current[index]?.block_type
-      const isListBlock = blockType === 'ul' || blockType === 'ol' || blockType === 'task_item'
-      // Lists behave like web (Tiptap): single Enter creates a new item / exits on empty.
-      // All other blocks need a double Enter to create a new block.
-      const endsWithNewBlock = isListBlock ? text.endsWith('\n') : text.endsWith('\n\n')
+      const block = blocksRef.current[index]
+      if (!block) return
 
-      if (endsWithNewBlock) {
-        const cleanText = text.slice(0, isListBlock ? -1 : -2)
-        setBlocks((prev) => {
-          const next = [...prev]
-          next[index] = { ...next[index], plaintext: cleanText }
-          return next
-        })
-        createNewBlockAfter(index)
+      const isListBlock =
+        block.block_type === 'ul' ||
+        block.block_type === 'ol' ||
+        block.block_type === 'task_item'
+
+      const newlineIdx = text.indexOf('\n')
+
+      if (newlineIdx !== -1) {
+        const before = text.slice(0, newlineIdx)
+        const after = text.slice(newlineIdx + 1)
+
+        if (isListBlock) {
+          if (before === '' && after === '') {
+            // Empty list item + Enter → exit list
+            setBlocks((prev) => {
+              const next = [...prev]
+              next[index] = {
+                ...next[index],
+                block_type: 'unstyled',
+                attrs: {},
+                markRanges: [],
+                plaintext: '',
+              }
+              return next
+            })
+            scheduleSave()
+            return
+          }
+
+          // Split list item
+          setBlocks((prev) => {
+            const b = prev[index]
+            const beforeRanges = adjustMarkRangesForEdit(b.markRanges, b.plaintext, before)
+            const shift = newlineIdx + 1
+            const afterRanges: MarkRange[] = b.markRanges
+              .map((r) => ({
+                ...r,
+                start: Math.max(0, r.start - shift),
+                end: Math.max(0, r.end - shift),
+              }))
+              .filter((r) => r.end > r.start && r.start < after.length)
+              .map((r) => ({ ...r, end: Math.min(r.end, after.length) }))
+
+            const newBlock = emptyBlock(b.block_type)
+            newBlock.attrs = b.block_type === 'task_item' ? { checked: false } : {}
+            newBlock.plaintext = after
+            newBlock.markRanges = afterRanges
+
+            const next = [...prev]
+            next[index] = { ...b, plaintext: before, markRanges: beforeRanges }
+            next.splice(index + 1, 0, newBlock)
+            return next
+          })
+        } else {
+          // Split non-list block at cursor
+          setBlocks((prev) => {
+            const b = prev[index]
+            const beforeRanges = adjustMarkRangesForEdit(b.markRanges, b.plaintext, before)
+            const shift = newlineIdx + 1
+            const afterRanges: MarkRange[] = b.markRanges
+              .map((r) => ({
+                ...r,
+                start: Math.max(0, r.start - shift),
+                end: Math.max(0, r.end - shift),
+              }))
+              .filter((r) => r.end > r.start && r.start < after.length)
+              .map((r) => ({ ...r, end: Math.min(r.end, after.length) }))
+
+            const newBlock = emptyBlock('unstyled')
+            newBlock.plaintext = after
+            newBlock.markRanges = afterRanges
+
+            const next = [...prev]
+            next[index] = { ...b, plaintext: before, markRanges: beforeRanges }
+            next.splice(index + 1, 0, newBlock)
+            return next
+          })
+        }
+
+        const nextIdx = index + 1
+        setFocusedIndex(nextIdx)
+        setTimeout(() => {
+          inputRefs.current[nextIdx]?.focus()
+          setTimeout(() => scrollBlockIntoView(nextIdx), 100)
+        }, 50)
+        scheduleSave()
         return
       }
 
+      // Normal text change
       setBlocks((prev) => {
+        const b = prev[index]
+        const newRanges = adjustMarkRangesForEdit(b.markRanges, b.plaintext, text)
         const next = [...prev]
-        next[index] = { ...next[index], plaintext: text }
+        next[index] = { ...b, plaintext: text, markRanges: newRanges }
         return next
       })
-      scheduleSave()
-    },
-    [scheduleSave],
-  )
-
-  const createNewBlockAfter = useCallback(
-    (index: number) => {
-      setBlocks((prev) => {
-        const currentBlock = prev[index]
-        const newType =
-          currentBlock.block_type === 'ul' ||
-          currentBlock.block_type === 'ol' ||
-          currentBlock.block_type === 'task_item'
-            ? currentBlock.block_type
-            : 'unstyled'
-
-        const markAttrs = copyTextMarks(currentBlock.attrs)
-        const newAttrs =
-          newType === 'task_item' ? { checked: false, ...markAttrs } : { ...markAttrs }
-
-        if (
-          currentBlock.plaintext === '' &&
-          (newType === 'ul' || newType === 'ol' || newType === 'task_item')
-        ) {
-          const next = [...prev]
-          next[index] = { ...next[index], block_type: 'unstyled', attrs: {} }
-          return next
-        }
-
-        const newBlock = emptyBlock(newType)
-        newBlock.attrs = newAttrs
-        const next = [...prev]
-        next.splice(index + 1, 0, newBlock)
-        return next
-      })
-
-      const nextIdx = index + 1
-      setFocusedIndex(nextIdx)
-      setTimeout(() => {
-        inputRefs.current[nextIdx]?.focus()
-        setTimeout(() => scrollBlockIntoView(nextIdx), 100)
-      }, 50)
       scheduleSave()
     },
     [scheduleSave, scrollBlockIntoView],
@@ -155,7 +248,11 @@ export function BlockEditor({ initialContent, onSave, onSubNotePress, onSubNoteL
 
   const handleKeyPress = useCallback(
     (index: number, e: NativeSyntheticEvent<TextInputKeyPressEventData>) => {
-      if (e.nativeEvent.key === 'Backspace' && blocks[index].plaintext === '' && blocks.length > 1) {
+      if (
+        e.nativeEvent.key === 'Backspace' &&
+        blocks[index].plaintext === '' &&
+        blocks.length > 1
+      ) {
         e.preventDefault?.()
         setBlocks((prev) => {
           const next = [...prev]
@@ -176,7 +273,7 @@ export function BlockEditor({ initialContent, onSave, onSubNotePress, onSubNoteL
       if (focusedIndex < 0 || focusedIndex >= blocks.length) return
       setBlocks((prev) => {
         const next = [...prev]
-        const mergedAttrs = { ...next[focusedIndex].attrs, ...(attrs ?? {}) }
+        const mergedAttrs = { ...(attrs ?? {}) }
         if (type === 'heading' && !attrs?.level) mergedAttrs.level = 1
         next[focusedIndex] = {
           ...next[focusedIndex],
@@ -192,22 +289,32 @@ export function BlockEditor({ initialContent, onSave, onSubNotePress, onSubNoteL
 
   const handleToggleTextMark = useCallback(
     (mark: TextMarkKey) => {
+      const idx = focusedIndexRef.current
       setBlocks((prev) => {
-        const i = focusedIndex
-        if (i < 0 || i >= prev.length) return prev
-        const b = prev[i]
+        if (idx < 0 || idx >= prev.length) return prev
+        const b = prev[idx]
         if (!blockSupportsTextMarks(b.block_type)) return prev
+
+        let { start, end } = selectionRef.current
+        if (start === end) {
+          // No selection: apply to current word
+          const wordRange = getCurrentWordRange(b.plaintext, start)
+          start = wordRange.start
+          end = wordRange.end
+        }
+
+        const newRanges = toggleMarkInRange(b.markRanges, b.plaintext, start, end, mark)
         const next = [...prev]
-        const cur = !!b.attrs[mark]
-        const newAttrs = { ...b.attrs }
-        if (cur) delete newAttrs[mark]
-        else newAttrs[mark] = true
-        next[i] = { ...b, attrs: newAttrs }
+        next[idx] = { ...b, markRanges: newRanges }
+
+        // Update active marks immediately
+        setActiveMarks(getActiveMarksAtSelection(newRanges, b.plaintext, start, end))
+
         return next
       })
       scheduleSave()
     },
-    [focusedIndex, scheduleSave],
+    [scheduleSave],
   )
 
   const handleInsertBlock = useCallback(
@@ -219,6 +326,7 @@ export function BlockEditor({ initialContent, onSave, onSubNotePress, onSubNoteL
           id: uid(),
           block_type: 'sub_note',
           plaintext: child.title || 'Ohne Titel',
+          markRanges: [],
           attrs: { noteId: child.id },
           indent: 0,
         }
@@ -264,6 +372,24 @@ export function BlockEditor({ initialContent, onSave, onSubNotePress, onSubNoteL
     [focusedIndex, scheduleSave, onCreateSubNote, onSave],
   )
 
+  const handleInsertBetween = useCallback(
+    (insertAt: number) => {
+      const newBlock = emptyBlock()
+      setBlocks((prev) => {
+        const next = [...prev]
+        next.splice(insertAt, 0, newBlock)
+        return next
+      })
+      setFocusedIndex(insertAt)
+      setTimeout(() => {
+        inputRefs.current[insertAt]?.focus()
+        setTimeout(() => scrollBlockIntoView(insertAt), 100)
+      }, 50)
+      scheduleSave()
+    },
+    [scheduleSave, scrollBlockIntoView],
+  )
+
   const handleToggleCheck = useCallback(
     (index: number) => {
       setBlocks((prev) => {
@@ -303,29 +429,6 @@ export function BlockEditor({ initialContent, onSave, onSubNotePress, onSubNoteL
     }
   }, [])
 
-  const scrollBlockIntoView = useCallback((index: number) => {
-    const row = blockRowRefs.current[index]
-    if (!row) return
-
-    requestAnimationFrame(() => {
-      row.measureInWindow((_x, y, _w, h) => {
-        const kbH = keyboardHeightRef.current
-        if (kbH === 0) return
-        const toolbarH = 46
-        const visibleBottom = _screenHeight - kbH - toolbarH
-        const blockBottom = y + h
-
-        if (blockBottom > visibleBottom) {
-          const overflowBy = blockBottom - visibleBottom + 40
-          scrollRef.current?.scrollTo({
-            y: (scrollOffsetRef.current ?? 0) + overflowBy,
-            animated: true,
-          })
-        }
-      })
-    })
-  }, [])
-
   const TOOLBAR_HEIGHT = 46
 
   return (
@@ -347,15 +450,20 @@ export function BlockEditor({ initialContent, onSave, onSubNotePress, onSubNoteL
         scrollEventThrottle={16}
       >
         {blocks.map((block, index) => {
-            if (block.block_type === 'sub_note') {
-              const noteId = block.attrs.noteId as string
-              const child = childNotes?.find((c) => c.id === noteId)
-              const displayTitle = child?.title || block.plaintext || 'Ohne Titel'
-              return (
+          if (block.block_type === 'sub_note') {
+            const noteId = block.attrs.noteId as string
+            const child = childNotes?.find((c) => c.id === noteId)
+            const displayTitle = child?.title || block.plaintext || 'Ohne Titel'
+            return (
+              <View key={block.id}>
+                {index > 0 && (
+                  <InsertGap onPress={() => handleInsertBetween(index)} />
+                )}
                 <View
-                  key={block.id}
                   style={styles.subNoteCard}
-                  ref={(ref) => { blockRowRefs.current[index] = ref }}
+                  ref={(ref) => {
+                    blockRowRefs.current[index] = ref
+                  }}
                 >
                   <TouchableOpacity
                     style={styles.subNoteMainTap}
@@ -365,7 +473,9 @@ export function BlockEditor({ initialContent, onSave, onSubNotePress, onSubNoteL
                     delayLongPress={400}
                   >
                     <Ionicons name="document-text-outline" size={16} color="#6b7280" />
-                    <Text style={styles.subNoteTitle} numberOfLines={1}>{displayTitle}</Text>
+                    <Text style={styles.subNoteTitle} numberOfLines={1}>
+                      {displayTitle}
+                    </Text>
                     <Ionicons name="chevron-forward" size={14} color="#d1d5db" />
                   </TouchableOpacity>
                   {onSubNoteLongPress ? (
@@ -379,20 +489,25 @@ export function BlockEditor({ initialContent, onSave, onSubNotePress, onSubNoteL
                     </TouchableOpacity>
                   ) : null}
                 </View>
-              )
-            }
+              </View>
+            )
+          }
 
-            let olNumber: number | undefined
-            if (block.block_type === 'ol') {
-              olNumber = 1
-              for (let j = index - 1; j >= 0; j--) {
-                if (blocks[j].block_type === 'ol') olNumber++
-                else break
-              }
+          let olNumber: number | undefined
+          if (block.block_type === 'ol') {
+            olNumber = 1
+            for (let j = index - 1; j >= 0; j--) {
+              if (blocks[j].block_type === 'ol') olNumber++
+              else break
             }
-            return (
+          }
+
+          return (
+            <View key={block.id}>
+              {index > 0 && (
+                <InsertGap onPress={() => handleInsertBetween(index)} />
+              )}
               <EditorBlockRow
-                key={block.id}
                 block={block}
                 index={index}
                 olNumber={olNumber}
@@ -401,8 +516,10 @@ export function BlockEditor({ initialContent, onSave, onSubNotePress, onSubNoteL
                 onKeyPress={(e) => handleKeyPress(index, e)}
                 onFocus={() => {
                   setFocusedIndex(index)
+                  selectionRef.current = { start: 0, end: 0 }
                   setTimeout(() => scrollBlockIntoView(index), 300)
                 }}
+                onSelectionChange={(sel) => handleSelectionChange(index, sel)}
                 onToggleCheck={() => handleToggleCheck(index)}
                 refCallback={(ref) => {
                   inputRefs.current[index] = ref
@@ -411,8 +528,9 @@ export function BlockEditor({ initialContent, onSave, onSubNotePress, onSubNoteL
                   blockRowRefs.current[index] = ref
                 }}
               />
-            )
-          })}
+            </View>
+          )
+        })}
       </ScrollView>
 
       {keyboardVisible && (
@@ -420,6 +538,7 @@ export function BlockEditor({ initialContent, onSave, onSubNotePress, onSubNoteL
           <EditorToolbar
             activeBlockType={focusedBlock?.block_type ?? 'unstyled'}
             activeAttrs={focusedBlock?.attrs ?? {}}
+            activeMarks={activeMarks}
             onChangeBlockType={handleChangeBlockType}
             onInsertBlock={handleInsertBlock}
             onOpenBlockMenu={() => setShowBlockMenu(true)}
@@ -441,6 +560,18 @@ export function BlockEditor({ initialContent, onSave, onSubNotePress, onSubNoteL
   )
 }
 
+function InsertGap({ onPress }: { onPress: () => void }) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      hitSlop={{ top: 5, bottom: 5, left: 40, right: 40 }}
+      style={styles.insertGap}
+    >
+      <View style={styles.insertGapDot} />
+    </TouchableOpacity>
+  )
+}
+
 interface EditorBlockRowProps {
   block: EditorBlock
   index: number
@@ -449,6 +580,7 @@ interface EditorBlockRowProps {
   onChangeText: (text: string) => void
   onKeyPress: (e: NativeSyntheticEvent<TextInputKeyPressEventData>) => void
   onFocus: () => void
+  onSelectionChange: (sel: { start: number; end: number }) => void
   onToggleCheck: () => void
   refCallback: (ref: TextInput | null) => void
   rowRefCallback: (ref: View | null) => void
@@ -462,72 +594,118 @@ function EditorBlockRow({
   onChangeText,
   onKeyPress,
   onFocus,
+  onSelectionChange,
   onToggleCheck,
   refCallback,
   rowRefCallback,
 }: EditorBlockRowProps) {
+  const localInputRef = useRef<TextInput | null>(null)
+
+  const setRef = useCallback(
+    (ref: TextInput | null) => {
+      localInputRef.current = ref
+      refCallback(ref)
+    },
+    [refCallback],
+  )
+
+  // Auto-focus TextInput when this block becomes focused
+  useEffect(() => {
+    if (isFocused) {
+      const t = setTimeout(() => localInputRef.current?.focus(), 30)
+      return () => clearTimeout(t)
+    }
+  }, [isFocused])
+
   if (block.block_type === 'hr') {
     return <View ref={rowRefCallback} style={styles.hr} />
   }
 
   const textStyle = getTextStyle(block)
-  const markStyle = getMarkStyle(block.attrs)
   const prefix = getPrefix(block, olNumber)
+  const isChecked = block.block_type === 'task_item' && !!block.attrs.checked
+
+  if (isFocused) {
+    return (
+      <View ref={rowRefCallback} style={styles.blockRow}>
+        {block.block_type === 'task_item' && (
+          <TouchableOpacity onPress={onToggleCheck} style={styles.checkboxWrap}>
+            <View style={[styles.checkbox, isChecked && styles.checkboxChecked]}>
+              {isChecked && <Ionicons name="checkmark" size={12} color="#fff" />}
+            </View>
+          </TouchableOpacity>
+        )}
+        {block.block_type === 'blockquote' && <View style={styles.quoteLine} />}
+        {prefix !== null && block.block_type !== 'task_item' && (
+          <Text style={styles.prefix}>{prefix}</Text>
+        )}
+        <TextInput
+          ref={setRef}
+          style={[styles.input, textStyle, isChecked && styles.checkedText]}
+          value={block.plaintext}
+          onChangeText={onChangeText}
+          onKeyPress={onKeyPress}
+          onFocus={onFocus}
+          onSelectionChange={(e) => onSelectionChange(e.nativeEvent.selection)}
+          placeholder={index === 0 && block.plaintext === '' ? 'Schreib etwas...' : undefined}
+          placeholderTextColor="#9ca3af"
+          multiline
+          blurOnSubmit={false}
+          autoCapitalize={block.block_type === 'code_block' ? 'none' : 'sentences'}
+        />
+      </View>
+    )
+  }
+
+  // Not focused: render styled text spans
+  const segments = buildStyledSegments(block.plaintext, block.markRanges)
 
   return (
-    <View ref={rowRefCallback} style={styles.blockRow}>
+    <TouchableOpacity
+      ref={rowRefCallback as any}
+      style={styles.blockRow}
+      onPress={onFocus}
+      activeOpacity={0.7}
+    >
       {block.block_type === 'task_item' && (
         <TouchableOpacity onPress={onToggleCheck} style={styles.checkboxWrap}>
-          <View
-            style={[
-              styles.checkbox,
-              !!block.attrs.checked && styles.checkboxChecked,
-            ]}
-          >
-            {!!block.attrs.checked && (
-              <Ionicons name="checkmark" size={12} color="#fff" />
-            )}
+          <View style={[styles.checkbox, isChecked && styles.checkboxChecked]}>
+            {isChecked && <Ionicons name="checkmark" size={12} color="#fff" />}
           </View>
         </TouchableOpacity>
       )}
-
-      {block.block_type === 'blockquote' && (
-        <View style={styles.quoteLine} />
-      )}
-
+      {block.block_type === 'blockquote' && <View style={styles.quoteLine} />}
       {prefix !== null && block.block_type !== 'task_item' && (
         <Text style={styles.prefix}>{prefix}</Text>
       )}
-
-      <TextInput
-        ref={refCallback}
-        style={[
-          styles.input,
-          textStyle,
-          markStyle,
-          block.block_type === 'task_item' && !!block.attrs.checked && styles.checkedText,
-        ]}
-        value={block.plaintext}
-        onChangeText={onChangeText}
-        onKeyPress={onKeyPress}
-        onFocus={onFocus}
-        placeholder={index === 0 && block.plaintext === '' ? 'Schreib etwas...' : undefined}
-        placeholderTextColor="#9ca3af"
-        multiline
-        blurOnSubmit={false}
-        autoCapitalize={block.block_type === 'code_block' ? 'none' : 'sentences'}
-      />
-    </View>
+      <Text style={[styles.input, textStyle, isChecked && styles.checkedText]}>
+        {block.plaintext === '' ? (
+          index === 0 ? (
+            <Text style={styles.placeholder}>Schreib etwas...</Text>
+          ) : null
+        ) : (
+          segments.map((seg, i) => (
+            <Text key={i} style={getSegmentStyle(seg)}>
+              {seg.text}
+            </Text>
+          ))
+        )}
+      </Text>
+    </TouchableOpacity>
   )
 }
 
-/** Only set keys that are active. RN merges styles so `fontWeight: undefined` would wipe heading weights. */
-function getMarkStyle(attrs: Record<string, unknown>): TextStyle {
+function getSegmentStyle(seg: {
+  bold?: true
+  italic?: true
+  underline?: true
+  strike?: true
+}): TextStyle {
   const out: TextStyle = {}
-  if (attrs.bold) out.fontWeight = '700'
-  if (attrs.italic) out.fontStyle = 'italic'
-  const underline = !!attrs.underline
-  const strike = !!attrs.strike
+  if (seg.bold) out.fontWeight = '700'
+  if (seg.italic) out.fontStyle = 'italic'
+  const underline = !!seg.underline
+  const strike = !!seg.strike
   if (underline && strike) out.textDecorationLine = 'underline line-through'
   else if (underline) out.textDecorationLine = 'underline'
   else if (strike) out.textDecorationLine = 'line-through'
@@ -623,6 +801,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
     margin: 0,
   },
+  placeholder: {
+    color: '#9ca3af',
+  },
   h1: {
     fontSize: 26,
     fontWeight: '700',
@@ -698,5 +879,17 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
+  },
+  insertGap: {
+    height: 8,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    paddingLeft: 4,
+  },
+  insertGapDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: '#e5e7eb',
   },
 })

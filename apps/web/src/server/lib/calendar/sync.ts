@@ -4,11 +4,13 @@ import {
   listGoogleEvents,
   listGoogleEventsDelta,
   getGoogleSyncToken,
+  refreshTokenIfNeeded,
 } from './google-calendar'
 import {
   listMicrosoftEvents,
   listMicrosoftEventsDelta,
   getMicrosoftDeltaLink,
+  refreshMicrosoftToken,
 } from './microsoft-graph'
 import type { NormalizedEvent } from './event-mapper'
 import { logActivity, ACT_MEETING_CREATED, ACT_MEETING_UPDATED } from '../activity'
@@ -26,15 +28,19 @@ export async function fullSync(account: CalendarAccount): Promise<void> {
   const timeMax = new Date(now)
   timeMax.setMonth(timeMax.getMonth() + FULL_SYNC_WINDOW_MONTHS)
 
+  const fresh = account.provider === 'google'
+    ? await refreshTokenIfNeeded(account)
+    : await refreshMicrosoftToken(account)
+
   let events: NormalizedEvent[]
   let nextSyncToken: string | null = null
 
-  if (account.provider === 'google') {
-    events = await listGoogleEvents(account, timeMin, timeMax)
-    nextSyncToken = await getGoogleSyncToken(account)
+  if (fresh.provider === 'google') {
+    events = await listGoogleEvents(fresh, timeMin, timeMax)
+    nextSyncToken = await getGoogleSyncToken(fresh)
   } else {
-    events = await listMicrosoftEvents(account, timeMin, timeMax)
-    nextSyncToken = await getMicrosoftDeltaLink(account)
+    events = await listMicrosoftEvents(fresh, timeMin, timeMax)
+    nextSyncToken = await getMicrosoftDeltaLink(fresh)
   }
 
   await upsertEvents(account, events)
@@ -70,29 +76,32 @@ export async function incrementalSync(account: CalendarAccount): Promise<void> {
     return
   }
 
+  const fresh = account.provider === 'google'
+    ? await refreshTokenIfNeeded(account)
+    : await refreshMicrosoftToken(account)
+
   let events: NormalizedEvent[]
   let nextSyncToken: string | null = null
 
-  if (account.provider === 'google') {
-    const result = await listGoogleEventsDelta(account, account.sync_token)
+  if (fresh.provider === 'google') {
+    const result = await listGoogleEventsDelta(fresh, fresh.sync_token!)
     if (result.nextSyncToken === null && result.events.length === 0) {
-      // Token abgelaufen
-      await fullSync(account)
+      await fullSync(fresh)
       return
     }
     events = result.events
     nextSyncToken = result.nextSyncToken
   } else {
-    const result = await listMicrosoftEventsDelta(account, account.sync_token)
+    const result = await listMicrosoftEventsDelta(fresh, fresh.sync_token!)
     if (result.nextDeltaLink === null && result.events.length === 0) {
-      await fullSync(account)
+      await fullSync(fresh)
       return
     }
     events = result.events
     nextSyncToken = result.nextDeltaLink
   }
 
-  await upsertEvents(account, events)
+  await upsertEvents(fresh, events)
 
   await prisma.calendarAccount.update({
     where: { id: account.id },

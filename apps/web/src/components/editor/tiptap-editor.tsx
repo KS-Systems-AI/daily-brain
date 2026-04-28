@@ -12,6 +12,7 @@ import Image from '@tiptap/extension-image'
 import TextAlign from '@tiptap/extension-text-align'
 import { TextStyle } from '@tiptap/extension-text-style'
 import Color from '@tiptap/extension-color'
+import Underline from '@tiptap/extension-underline'
 import { SlashCommands, SlashCommandMenu } from './slash-commands'
 import { SubNoteExtension } from './sub-note-node'
 import { cn } from '@/lib/utils'
@@ -57,6 +58,7 @@ export function TiptapEditor({ content, onChange, placeholder = 'Schreib etwas o
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
       TextStyle,
       Color,
+      Underline,
       SlashCommands,
       SubNoteExtension,
     ],
