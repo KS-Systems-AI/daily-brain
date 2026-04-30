@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import type { Editor } from '@tiptap/react'
 import { useEditorNote } from './editor-context'
+import { createHorizontalRuleNode, getSelectedTopLevelBlock, insertTopLevelBlockAtIndex } from './block-operations'
 
 interface SlashCommandItem {
   title: string
@@ -101,7 +102,25 @@ const SLASH_COMMANDS: SlashCommandItem[] = [
     title: 'Trennlinie',
     description: 'Horizontale Linie einfügen',
     icon: Minus,
-    command: (editor) => editor.chain().focus().setHorizontalRule().run(),
+    command: (editor) => insertTopLevelBlockAtIndex(editor, getSelectedTopLevelBlock(editor)?.index ?? null, createHorizontalRuleNode('solid')),
+  },
+  {
+    title: 'Dicke Trennlinie',
+    description: 'Kräftige horizontale Linie einfügen',
+    icon: Minus,
+    command: (editor) => insertTopLevelBlockAtIndex(editor, getSelectedTopLevelBlock(editor)?.index ?? null, createHorizontalRuleNode('thick')),
+  },
+  {
+    title: 'Gestrichelte Trennlinie',
+    description: 'Horizontale gestrichelte Linie einfügen',
+    icon: Minus,
+    command: (editor) => insertTopLevelBlockAtIndex(editor, getSelectedTopLevelBlock(editor)?.index ?? null, createHorizontalRuleNode('dashed')),
+  },
+  {
+    title: 'Gepunktete Trennlinie',
+    description: 'Horizontale gepunktete Linie einfügen',
+    icon: Minus,
+    command: (editor) => insertTopLevelBlockAtIndex(editor, getSelectedTopLevelBlock(editor)?.index ?? null, createHorizontalRuleNode('dotted')),
   },
 ]
 

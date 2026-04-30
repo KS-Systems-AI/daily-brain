@@ -5,6 +5,7 @@ import { trpc } from '@/lib/trpc/provider'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
+import { useToast } from '@/hooks/use-toast'
 import { CheckCircle, Trash2, RefreshCw, AlertCircle } from 'lucide-react'
 
 const GOOGLE_ICON = (
@@ -29,11 +30,30 @@ export function CalendarSettings(): React.JSX.Element {
   const searchParams = useSearchParams()
   const connected = searchParams.get('connected')
   const error = searchParams.get('error')
+  const { toast } = useToast()
 
   const { data: accounts = [], isLoading } = trpc.calendar.listAccounts.useQuery()
   const utils = trpc.useUtils()
   const syncMutation = trpc.calendar.syncNow.useMutation({
-    onSuccess: () => utils.calendar.listAccounts.invalidate(),
+    onSuccess: async (_, input) => {
+      await Promise.all([
+        utils.calendar.listAccounts.invalidate(),
+        utils.calendar.list.invalidate(),
+      ])
+      const account = accounts.find((entry) => entry.id === input.accountId)
+      toast({
+        title: 'Kalender synchronisiert',
+        description: account ? `${account.display_name ?? account.email} wurde erfolgreich synchronisiert.` : 'Der Kalender wurde erfolgreich synchronisiert.',
+        variant: 'success',
+      })
+    },
+    onError: (err) => {
+      toast({
+        title: 'Kalender-Sync fehlgeschlagen',
+        description: err.message,
+        variant: 'destructive',
+      })
+    },
   })
   const disconnectMutation = trpc.calendar.disconnectAccount.useMutation({
     onSuccess: () => utils.calendar.listAccounts.invalidate(),

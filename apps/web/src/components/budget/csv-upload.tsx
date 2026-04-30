@@ -3,8 +3,18 @@
 import { useState, useRef } from 'react'
 import { Upload, FileText, CheckCircle2, AlertCircle, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import { trpc } from '@/lib/trpc/provider'
+
+type ColumnKey = 'date' | 'amount' | 'recipient' | 'sender' | 'subject' | 'iban'
+type ColumnMap = Record<ColumnKey, null | string>
 
 type UploadResult = {
   imported: number
@@ -15,15 +25,36 @@ type UploadResult = {
   parseErrors: string[]
 }
 
+type UploadErrorResponse = {
+  error?: string
+  details?: string[]
+  needsMapping?: boolean
+  headers?: string[]
+  columnMap?: Partial<ColumnMap>
+}
+
+const EMPTY_COLUMN_MAP: ColumnMap = {
+  date: null,
+  amount: null,
+  recipient: null,
+  sender: null,
+  subject: null,
+  iban: null,
+}
+
 export function CsvUpload({ onSuccess }: { onSuccess: () => void }): React.JSX.Element {
   const [dragging, setDragging] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [result, setResult] = useState<UploadResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [mappingHeaders, setMappingHeaders] = useState<string[]>([])
+  const [mappingDetails, setMappingDetails] = useState<string[]>([])
+  const [mapping, setMapping] = useState<ColumnMap>(EMPTY_COLUMN_MAP)
+  const [pendingFile, setPendingFile] = useState<File | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const utils = trpc.useUtils()
 
-  async function upload(file: File): Promise<void> {
+  async function upload(file: File, columnMap?: ColumnMap): Promise<void> {
     if (!file.name.endsWith('.csv') && file.type !== 'text/csv') {
       setError('Nur CSV-Dateien werden unterstützt')
       return
@@ -34,14 +65,32 @@ export function CsvUpload({ onSuccess }: { onSuccess: () => void }): React.JSX.E
 
     const formData = new FormData()
     formData.append('file', file)
+    if (columnMap) {
+      formData.append('mapping', JSON.stringify(columnMap))
+    }
 
     try {
       const res = await fetch('/api/budget/upload', { method: 'POST', body: formData })
-      const json = await res.json() as UploadResult & { error?: string }
+      const json = await res.json() as UploadResult & UploadErrorResponse
       if (!res.ok) {
-        setError(json.error ?? 'Upload fehlgeschlagen')
+        if (res.status === 422 && json.needsMapping && json.headers?.length) {
+          setPendingFile(file)
+          setMappingHeaders(json.headers)
+          setMappingDetails(json.details ?? [])
+          setMapping({
+            ...EMPTY_COLUMN_MAP,
+            ...json.columnMap,
+          })
+          setError(null)
+        } else {
+          setError(json.error ?? 'Upload fehlgeschlagen')
+        }
       } else {
         setResult(json)
+        setPendingFile(null)
+        setMappingHeaders([])
+        setMappingDetails([])
+        setMapping(EMPTY_COLUMN_MAP)
         await utils.budget.invalidate()
         onSuccess()
       }
@@ -62,6 +111,21 @@ export function CsvUpload({ onSuccess }: { onSuccess: () => void }): React.JSX.E
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>): void {
     const file = e.target.files?.[0]
     if (file) void upload(file)
+  }
+
+  function updateMapping(field: ColumnKey, value: string): void {
+    setMapping((current) => ({
+      ...current,
+      [field]: value === 'none' ? null : value,
+    }))
+  }
+
+  async function uploadWithMapping(): Promise<void> {
+    if (!pendingFile || !mapping.date || !mapping.amount) {
+      setError('Bitte ordne mindestens Datum und Betrag zu.')
+      return
+    }
+    await upload(pendingFile, mapping)
   }
 
   return (
@@ -120,6 +184,121 @@ export function CsvUpload({ onSuccess }: { onSuccess: () => void }): React.JSX.E
           )}
         </div>
       )}
+
+      {mappingHeaders.length > 0 && pendingFile && (
+        <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50/70 p-4">
+          <div className="flex items-start gap-2">
+            <FileText size={16} className="mt-0.5 text-amber-700" />
+            <div>
+              <p className="text-sm font-medium text-amber-900">Spalten manuell zuordnen</p>
+              <p className="text-xs text-amber-800">
+                Die Header der CSV konnten nicht sicher erkannt werden. Wir haben die Datei behalten und du kannst die nötigen Spalten jetzt einmalig zuordnen.
+              </p>
+            </div>
+          </div>
+
+          {mappingDetails.length > 0 && (
+            <div className="rounded-md bg-white/70 px-3 py-2 text-xs text-amber-800">
+              {mappingDetails.join(' · ')}
+            </div>
+          )}
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <MappingSelect
+              label="Datum"
+              required
+              value={mapping.date}
+              headers={mappingHeaders}
+              onChange={(value) => updateMapping('date', value)}
+            />
+            <MappingSelect
+              label="Betrag"
+              required
+              value={mapping.amount}
+              headers={mappingHeaders}
+              onChange={(value) => updateMapping('amount', value)}
+            />
+            <MappingSelect
+              label="Empfänger"
+              value={mapping.recipient}
+              headers={mappingHeaders}
+              onChange={(value) => updateMapping('recipient', value)}
+            />
+            <MappingSelect
+              label="Sender"
+              value={mapping.sender}
+              headers={mappingHeaders}
+              onChange={(value) => updateMapping('sender', value)}
+            />
+            <MappingSelect
+              label="Verwendungszweck"
+              value={mapping.subject}
+              headers={mappingHeaders}
+              onChange={(value) => updateMapping('subject', value)}
+            />
+            <MappingSelect
+              label="IBAN"
+              value={mapping.iban}
+              headers={mappingHeaders}
+              onChange={(value) => updateMapping('iban', value)}
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={() => void uploadWithMapping()} disabled={uploading || !mapping.date || !mapping.amount}>
+              CSV mit Zuordnung importieren
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setPendingFile(null)
+                setMappingHeaders([])
+                setMappingDetails([])
+                setMapping(EMPTY_COLUMN_MAP)
+              }}
+            >
+              Abbrechen
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
+  )
+}
+
+function MappingSelect({
+  headers,
+  label,
+  onChange,
+  required = false,
+  value,
+}: {
+  headers: string[]
+  label: string
+  onChange: (value: string) => void
+  required?: boolean
+  value: null | string
+}): React.JSX.Element {
+  return (
+    <label className="space-y-1">
+      <span className="text-xs font-medium text-amber-950">
+        {label}
+        {required ? ' *' : ''}
+      </span>
+      <Select value={value ?? 'none'} onValueChange={onChange}>
+        <SelectTrigger className="bg-white">
+          <SelectValue placeholder="Spalte wählen" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="none">Nicht zuordnen</SelectItem>
+          {headers.map((header) => (
+            <SelectItem key={header} value={header}>
+              {header}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </label>
   )
 }

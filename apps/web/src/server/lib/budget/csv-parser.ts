@@ -10,7 +10,7 @@ export type ParsedTransaction = {
   rawData: Record<string, string>
 }
 
-type ColumnMap = {
+export type ColumnMap = {
   date: string | null
   amount: string | null
   recipient: string | null
@@ -204,6 +204,19 @@ const papaParse = Papa.parse as unknown as ParseFn
 export function parseCSV(csvContent: string): {
   transactions: ParsedTransaction[]
   columnMap: ColumnMap
+  headers: string[]
+  errors: string[]
+}
+export function parseCSV(csvContent: string, overrides: Partial<ColumnMap>): {
+  transactions: ParsedTransaction[]
+  columnMap: ColumnMap
+  headers: string[]
+  errors: string[]
+}
+export function parseCSV(csvContent: string, overrides?: Partial<ColumnMap>): {
+  transactions: ParsedTransaction[]
+  columnMap: ColumnMap
+  headers: string[]
   errors: string[]
 } {
   const errors: string[] = []
@@ -228,12 +241,21 @@ export function parseCSV(csvContent: string): {
     return {
       transactions: [],
       columnMap: { date: null, amount: null, recipient: null, sender: null, subject: null, iban: null },
+      headers: [],
       errors: ['CSV leer oder ungültig'],
     }
   }
 
   const headers = result.meta.fields ?? []
-  const columnMap = detectColumnMap(headers)
+  const detectedMap = detectColumnMap(headers)
+  const columnMap: ColumnMap = {
+    date: overrides?.date && headers.includes(overrides.date) ? overrides.date : detectedMap.date,
+    amount: overrides?.amount && headers.includes(overrides.amount) ? overrides.amount : detectedMap.amount,
+    recipient: overrides?.recipient && headers.includes(overrides.recipient) ? overrides.recipient : detectedMap.recipient,
+    sender: overrides?.sender && headers.includes(overrides.sender) ? overrides.sender : detectedMap.sender,
+    subject: overrides?.subject && headers.includes(overrides.subject) ? overrides.subject : detectedMap.subject,
+    iban: overrides?.iban && headers.includes(overrides.iban) ? overrides.iban : detectedMap.iban,
+  }
 
   if (!columnMap.date) errors.push(`Datumsspalte nicht erkannt (alle Spalten: ${headers.join(' | ')})`)
   if (!columnMap.amount) errors.push(`Betragsspalte nicht erkannt (alle Spalten: ${headers.join(' | ')})`)
@@ -261,6 +283,7 @@ export function parseCSV(csvContent: string): {
     }
 
     const recipientCol = columnMap.recipient
+    const senderCol = columnMap.sender
     const subjectCol = columnMap.subject
     const ibanCol = columnMap.iban
 
@@ -268,12 +291,12 @@ export function parseCSV(csvContent: string): {
       date,
       amount,
       recipient: recipientCol ? (row[recipientCol]?.replace(/^["']|["']$/g, '').trim() || null) : null,
-      sender: null,
+      sender: senderCol ? (row[senderCol]?.replace(/^["']|["']$/g, '').trim() || null) : null,
       subject: subjectCol ? (row[subjectCol]?.replace(/^["']|["']$/g, '').trim() || null) : null,
       iban: ibanCol ? (row[ibanCol]?.replace(/^["']|["']$/g, '').trim() || null) : null,
       rawData: row,
     })
   }
 
-  return { transactions, columnMap, errors }
+  return { transactions, columnMap, headers, errors }
 }

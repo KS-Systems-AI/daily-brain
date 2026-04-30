@@ -3,16 +3,7 @@
 import { trpc } from '@/lib/trpc/provider'
 import { TiptapEditor } from '@/components/editor/tiptap-editor'
 import { EditorNoteProvider } from '@/components/editor/editor-context'
-import {
-  ArrowLeft,
-  Pin,
-  Trash2,
-  MoreHorizontal,
-  Loader2,
-  ChevronRight,
-  FileText,
-  Plus,
-} from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { RecordSelector, type SelectedRecord } from '@/components/common/record-selector'
@@ -35,8 +26,6 @@ export function NoteEditorPage({ noteId }: NoteEditorPageProps) {
   const router = useRouter()
   const utils = trpc.useUtils()
   const [title, setTitle] = useState('')
-  const [showMenu, setShowMenu] = useState(false)
-  const [isSaving, setIsSaving] = useState(false)
   const [linkedRecord, setLinkedRecord] = useState<SelectedRecord | null>(null)
   const [pendingRemoveNoteId, setPendingRemoveNoteId] = useState<string | null>(null)
   const [editorVersion, setEditorVersion] = useState(0)
@@ -55,14 +44,12 @@ export function NoteEditorPage({ noteId }: NoteEditorPageProps) {
 
   const saveContent = trpc.notes.saveFromTiptap.useMutation({
     onMutate: () => {
-      setIsSaving(true)
       skipNextRemoteEditorSyncRef.current = true
     },
     onError: () => {
       skipNextRemoteEditorSyncRef.current = false
     },
     onSettled: () => {
-      setIsSaving(false)
       utils.notes.list.invalidate()
       utils.notes.getById.invalidate({ id: noteId })
     },
@@ -243,6 +230,8 @@ export function NoteEditorPage({ noteId }: NoteEditorPageProps) {
     }
   }, [noteId])
 
+  const isSaving = saveContent.isPending || updateNote.isPending
+  const saveLabel = isSaving ? 'Speichert…' : 'Automatisch gespeichert'
   const noteChildren = note?.children ?? []
 
   const { editorContent, contentWasCleaned } = useMemo(() => {
@@ -285,164 +274,58 @@ export function NoteEditorPage({ noteId }: NoteEditorPageProps) {
     )
   }
 
-  const breadcrumbs = note.breadcrumbs ?? []
-
   return (
     <EditorNoteProvider
       value={{ currentNoteId: noteId, createChildNote: handleCreateChildNote, saveNow: handleSaveNow, onSubNoteRemove: handleSubNoteRemove }}
     >
-      <div className="flex h-full flex-col">
-        <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-          <nav className="flex items-center gap-1 text-[12px]">
-            <button
-              onClick={() => router.push('/notes')}
-              className="rounded-md px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              Notizen
-            </button>
-            {breadcrumbs.map((crumb) => (
-              <span key={crumb.id} className="flex items-center gap-1">
-                <ChevronRight size={11} className="text-muted-foreground/40" />
-                <button
-                  onClick={() => router.push(`/notes/${crumb.id}`)}
-                  className="max-w-[150px] truncate rounded-md px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                >
-                  {crumb.title || 'Ohne Titel'}
-                </button>
+      <div className="flex h-full flex-col overflow-y-auto px-4 py-2 md:px-6 md:py-3">
+        <div className="rounded-[28px] border border-[#E8ECF2] bg-[linear-gradient(180deg,#FFFFFF_0%,#FCFDFE_100%)] shadow-[0_24px_80px_rgba(15,23,42,0.07)]">
+          <div className="border-b border-[#EDF1F5] px-4 py-2.5 md:px-6">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-[#F3F6FA] px-3 py-1 text-[11px] font-medium text-[#667085]">
+                Dokument
               </span>
-            ))}
-            <ChevronRight size={11} className="text-muted-foreground/40" />
-            <span className="max-w-[200px] truncate px-1.5 py-0.5 font-medium text-foreground">
-              {title || 'Ohne Titel'}
-            </span>
-          </nav>
-
-          <div className="flex items-center gap-2">
-            {isSaving && (
-              <span className="flex items-center gap-1 text-[11px] text-muted-foreground/50">
-                <Loader2 size={10} className="animate-spin" />
-                Speichert...
+              <span className="rounded-full bg-[#FFF4EC] px-3 py-1 text-[11px] font-medium text-[#D56A34]">
+                {saveLabel}
               </span>
-            )}
-            <div className="relative flex items-center gap-1">
-              <button
-                onClick={() => updateNote.mutate({ id: noteId, is_pinned: !note.is_pinned })}
-                className={`rounded p-1.5 transition-colors ${
-                  note.is_pinned
-                    ? 'text-foreground'
-                    : 'text-muted-foreground/40 hover:text-muted-foreground'
-                }`}
-              >
-                <Pin size={14} />
-              </button>
-              <button
-                onClick={() => setShowMenu(!showMenu)}
-                className="rounded p-1.5 text-muted-foreground/40 transition-colors hover:text-muted-foreground"
-              >
-                <MoreHorizontal size={14} />
-              </button>
-              {showMenu && (
-                <div className="absolute right-0 top-8 z-10 min-w-[130px] rounded-lg border border-border bg-popover py-1 shadow-lg">
-                  <button
-                    onClick={() => deleteNote.mutate({ id: noteId })}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-[12px] text-red-500 hover:bg-muted"
-                  >
-                    <Trash2 size={12} />
-                    Notiz löschen
-                  </button>
-                </div>
+              {note.parent_id && (
+                <span className="rounded-full bg-[#EEF4FF] px-3 py-1 text-[11px] font-medium text-[#1D4ED8]">
+                  Unternotiz
+                </span>
               )}
             </div>
-          </div>
-        </div>
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          <div className="mx-auto w-full max-w-2xl px-6 pt-6 pb-2">
             <input
               type="text"
               value={title}
               onChange={(e) => handleTitleChange(e.target.value)}
               placeholder="Ohne Titel"
-              className="w-full bg-transparent text-[22px] font-semibold text-foreground placeholder-muted-foreground/30 outline-none"
-              style={{ letterSpacing: '-0.02em' }}
+              className="mb-2 w-full bg-transparent text-[28px] font-semibold tracking-[-0.04em] text-foreground outline-none placeholder:text-[#B4BDC9] md:text-[34px]"
             />
-            <div className="mt-3">
+
+            <div className="rounded-[20px] border border-[#EEF2F6] bg-[#FAFBFC] p-1.5">
               <RecordSelector
                 value={linkedRecord}
                 onChange={handleRecordChange}
                 placeholder="Person oder Firma verknüpfen..."
+                className="w-full"
               />
             </div>
           </div>
 
-          <TiptapEditor
-            key={`${noteId}-${editorVersion}`}
-            content={editorContent as Record<string, unknown>}
-            onChange={handleContentChange}
-            onEditorReady={(e) => { editorRef.current = e }}
-            placeholder="Schreib etwas..."
-          />
-
-          {/* Child notes overview */}
-          <div className="mx-auto w-full max-w-2xl px-6 pb-8">
-            <div className="border-t border-border pt-4">
-              <div className="mb-3 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-[12px] font-medium text-muted-foreground/60">
-                    Unternotizen
-                  </span>
-                  {noteChildren.length > 0 && (
-                    <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                      {noteChildren.length}
-                    </span>
-                  )}
-                </div>
-                <button
-                  onClick={handleCreateAndNavigate}
-                  disabled={createChildNote.isPending}
-                  className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
-                >
-                  <Plus size={12} />
-                  Erstellen
-                </button>
-              </div>
-
-              {noteChildren.length === 0 ? (
-                <p className="py-3 text-center text-[12px] text-muted-foreground/40">
-                  Keine Unternotizen
-                </p>
-              ) : (
-                <div className="space-y-1">
-                  {noteChildren.map((child) => (
-                    <button
-                      key={child.id}
-                      onClick={() => router.push(`/notes/${child.id}`)}
-                      className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted"
-                    >
-                      <FileText size={14} className="shrink-0 text-muted-foreground/50" />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-[13px] font-medium text-foreground">
-                          {child.title || 'Ohne Titel'}
-                        </p>
-                        {child.content_text && (
-                          <p className="truncate text-[11px] text-muted-foreground/50">
-                            {child.content_text.slice(0, 80)}
-                          </p>
-                        )}
-                      </div>
-                      {child._count.children > 0 && (
-                        <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                          {child._count.children}
-                        </span>
-                      )}
-                      <ChevronRight size={13} className="shrink-0 text-muted-foreground/30" />
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+          <div className="px-4 py-4 md:px-6 md:py-5">
+            <TiptapEditor
+              key={`${noteId}-${editorVersion}`}
+              content={editorContent as Record<string, unknown>}
+              onChange={handleContentChange}
+              onEditorReady={(e) => { editorRef.current = e }}
+              placeholder="Schreib etwas oder drücke / für Befehle..."
+            />
           </div>
+
         </div>
+
+        <div className="h-3" />
       </div>
 
       <SubNoteRemoveDialog

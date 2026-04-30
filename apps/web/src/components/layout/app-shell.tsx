@@ -28,6 +28,7 @@ import {
   LogOut,
   Command,
   Wallet,
+  PanelLeft,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState, useMemo, useEffect } from 'react'
@@ -84,11 +85,13 @@ export function AppShell({ children }: { children: React.ReactNode }): React.JSX
   const [recordsOpen, setRecordsOpen] = useState(true)
   const [listsOpen, setListsOpen] = useState(true)
   const [chatsOpen, setChatsOpen] = useState(true)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   const [cmdOpen, setCmdOpen] = useState(false)
   const [contactDialogOpen, setContactDialogOpen] = useState(false)
   const [taskDialogOpen, setTaskDialogOpen] = useState(false)
   const [voiceNoteOpen, setVoiceNoteOpen] = useState(false)
+  const isSidebarCollapsed = sidebarCollapsed
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -104,30 +107,55 @@ export function AppShell({ children }: { children: React.ReactNode }): React.JSX
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       {/* Sidebar */}
-      <aside className="flex w-[240px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
+      <aside
+        className={cn(
+          'flex shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-300 ease-out',
+          sidebarCollapsed
+            ? 'w-[76px]'
+            : 'w-[240px]',
+        )}
+      >
         {/* Workspace Header */}
-        <div className="flex items-center gap-2.5 px-4 py-3">
+        <div
+          className={cn(
+            'flex items-center py-3',
+            isSidebarCollapsed ? 'justify-center gap-2 px-2' : 'gap-2.5 px-4',
+          )}
+        >
           <Image src="/logo.png" alt="Daily Brain" width={32} height={32} className="rounded-lg" />
-          <div className="flex flex-1 items-center gap-1">
+          <div className={cn('flex flex-1 items-center gap-1', isSidebarCollapsed && 'hidden')}>
             <span className="truncate text-[13px] font-semibold text-foreground">Daily Brain</span>
             <ChevronDown size={12} className="shrink-0 text-muted-foreground" />
           </div>
-          <div className="flex items-center gap-0.5">
+          <div className={cn('flex items-center gap-0.5', isSidebarCollapsed && 'hidden')}>
             <button className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" title="Kopieren">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             </button>
           </div>
+          <button
+            type="button"
+            onClick={() => setSidebarCollapsed((v) => !v)}
+            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label={sidebarCollapsed ? 'Sidebar verbreitern' : 'Sidebar einklappen'}
+            title={sidebarCollapsed ? 'Sidebar verbreitern' : 'Sidebar einklappen'}
+          >
+            <PanelLeft size={15} className={cn('transition-transform duration-300', sidebarCollapsed && 'rotate-180')} />
+          </button>
         </div>
 
         {/* Schnellaktionen */}
         <div className="px-3 pb-1">
           <button
             onClick={() => setCmdOpen(true)}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-sidebar-foreground transition-colors hover:bg-muted"
+            className={cn(
+              'flex w-full items-center rounded-md text-[13px] text-sidebar-foreground transition-colors hover:bg-muted',
+              isSidebarCollapsed ? 'justify-center px-2 py-2' : 'gap-2 px-2 py-1.5',
+            )}
+            title="Schnellaktionen"
           >
             <Zap size={14} className="shrink-0" />
-            <span>Schnellaktionen</span>
-            <div className="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground">
+            <span className={cn(isSidebarCollapsed && 'hidden')}>Schnellaktionen</span>
+            <div className={cn('ml-auto items-center gap-1 text-[11px] text-muted-foreground', isSidebarCollapsed ? 'hidden' : 'flex')}>
               <kbd className="rounded border border-border bg-muted px-1 py-0.5 text-[10px]">
                 <Command size={9} className="inline" />K
               </kbd>
@@ -140,10 +168,14 @@ export function AppShell({ children }: { children: React.ReactNode }): React.JSX
         <div className="px-3 pb-2">
           <button
             onClick={() => router.push('/notes?focus=search')}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-sidebar-foreground transition-colors hover:bg-muted"
+            className={cn(
+              'flex w-full items-center rounded-md text-[13px] text-sidebar-foreground transition-colors hover:bg-muted',
+              isSidebarCollapsed ? 'justify-center px-2 py-2' : 'gap-2 px-2 py-1.5',
+            )}
+            title="Suche"
           >
             <Search size={14} className="shrink-0" />
-            <span>Suche</span>
+            <span className={cn(isSidebarCollapsed && 'hidden')}>Suche</span>
           </button>
         </div>
 
@@ -160,18 +192,21 @@ export function AppShell({ children }: { children: React.ReactNode }): React.JSX
                 <Link
                   key={href}
                   href={href}
+                  title={label}
                   className={cn(
-                    'flex items-center gap-2.5 rounded-md px-2.5 py-[6px] text-[13px] transition-colors',
+                    'relative flex items-center rounded-md py-[6px] text-[13px] transition-colors',
+                    isSidebarCollapsed ? 'justify-center px-2' : 'gap-2.5 px-2.5',
                     active
                       ? 'bg-accent font-medium text-foreground'
                       : 'text-sidebar-foreground hover:bg-muted',
                   )}
                 >
                   <Icon size={15} strokeWidth={1.75} className="shrink-0" />
-                  <span className="flex-1">{label}</span>
+                  <span className={cn('flex-1', isSidebarCollapsed && 'hidden')}>{label}</span>
                   {displayBadge > 0 && (
                     <span className={cn(
                       'flex size-[18px] items-center justify-center rounded-full text-[10px] font-medium text-white',
+                      isSidebarCollapsed && 'absolute ml-4 -mt-4 size-[14px] text-[9px]',
                       isNotifBadge ? 'bg-blue-500' : 'bg-red-500',
                     )}>
                       {displayBadge}
@@ -186,15 +221,25 @@ export function AppShell({ children }: { children: React.ReactNode }): React.JSX
           <div className="mt-1">
             <button
               onClick={() => setAutomationsOpen(!automationsOpen)}
-              className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-[6px] text-[13px] text-sidebar-foreground transition-colors hover:bg-muted"
+              className={cn(
+                'flex w-full items-center rounded-md py-[6px] text-[13px] text-sidebar-foreground transition-colors hover:bg-muted',
+                isSidebarCollapsed ? 'justify-center px-2' : 'gap-2.5 px-2.5',
+              )}
+              title="Automatisierungen"
             >
+              {isSidebarCollapsed ? (
+                <Zap size={15} className="shrink-0" />
+              ) : (
+                <>
               <ChevronRight
                 size={12}
                 className={cn('shrink-0 transition-transform', automationsOpen && 'rotate-90')}
               />
               <span>Automatisierungen</span>
+                </>
+              )}
             </button>
-            {automationsOpen && (
+            {!isSidebarCollapsed && automationsOpen && (
               <div className="ml-5 space-y-0.5 border-l border-border pl-2.5">
                 <Link
                   href="/automations/sequences"
@@ -214,17 +259,19 @@ export function AppShell({ children }: { children: React.ReactNode }): React.JSX
 
           {/* Datensätze */}
           <div className="mt-4">
-            <button
-              onClick={() => setRecordsOpen(!recordsOpen)}
-              className="flex w-full items-center gap-1 px-2.5 py-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground"
-            >
-              <ChevronRight
-                size={10}
-                className={cn('shrink-0 transition-transform', recordsOpen && 'rotate-90')}
-              />
-              Datensätze
-            </button>
-            {recordsOpen && (
+            {!isSidebarCollapsed ? (
+              <button
+                onClick={() => setRecordsOpen(!recordsOpen)}
+                className="flex w-full items-center gap-1 px-2.5 py-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground"
+              >
+                <ChevronRight
+                  size={10}
+                  className={cn('shrink-0 transition-transform', recordsOpen && 'rotate-90')}
+                />
+                Datensätze
+              </button>
+            ) : null}
+            {(recordsOpen || isSidebarCollapsed) && (
               <div className="mt-0.5 space-y-0.5">
                 {recordsNav.map(({ href, label, icon: Icon, color }) => {
                   const active = pathname.startsWith(href)
@@ -232,15 +279,17 @@ export function AppShell({ children }: { children: React.ReactNode }): React.JSX
                     <Link
                       key={href}
                       href={href}
+                      title={label}
                       className={cn(
-                        'flex items-center gap-2.5 rounded-md px-2.5 py-[6px] text-[13px] transition-colors',
+                        'flex items-center rounded-md py-[6px] text-[13px] transition-colors',
+                        isSidebarCollapsed ? 'justify-center px-2' : 'gap-2.5 px-2.5',
                         active
                           ? 'bg-accent font-medium text-foreground'
                           : 'text-sidebar-foreground hover:bg-muted',
                       )}
                     >
                       <Icon size={15} strokeWidth={1.75} className={cn('shrink-0', color)} />
-                      {label}
+                      <span className={cn(isSidebarCollapsed && 'hidden')}>{label}</span>
                     </Link>
                   )
                 })}
@@ -250,21 +299,29 @@ export function AppShell({ children }: { children: React.ReactNode }): React.JSX
 
           {/* Listen */}
           <div className="mt-4">
-            <button
-              onClick={() => setListsOpen(!listsOpen)}
-              className="flex w-full items-center gap-1 px-2.5 py-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground"
-            >
-              <ChevronRight
-                size={10}
-                className={cn('shrink-0 transition-transform', listsOpen && 'rotate-90')}
-              />
-              Listen
-            </button>
-            {listsOpen && (
+            {!isSidebarCollapsed ? (
+              <button
+                onClick={() => setListsOpen(!listsOpen)}
+                className="flex w-full items-center gap-1 px-2.5 py-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground"
+              >
+                <ChevronRight
+                  size={10}
+                  className={cn('shrink-0 transition-transform', listsOpen && 'rotate-90')}
+                />
+                Listen
+              </button>
+            ) : null}
+            {(listsOpen || isSidebarCollapsed) && (
               <div className="mt-0.5">
-                <button className="flex w-full items-center gap-2 rounded-md px-2.5 py-[6px] text-[13px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                <button
+                  className={cn(
+                    'flex w-full items-center rounded-md py-[6px] text-[13px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+                    isSidebarCollapsed ? 'justify-center px-2' : 'gap-2 px-2.5',
+                  )}
+                  title="Neue Liste"
+                >
                   <Plus size={14} className="shrink-0" />
-                  Neue Liste
+                  <span className={cn(isSidebarCollapsed && 'hidden')}>Neue Liste</span>
                 </button>
               </div>
             )}
@@ -272,24 +329,30 @@ export function AppShell({ children }: { children: React.ReactNode }): React.JSX
 
           {/* Chats */}
           <div className="mt-4">
-            <button
-              onClick={() => setChatsOpen(!chatsOpen)}
-              className="flex w-full items-center gap-1 px-2.5 py-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground"
-            >
-              <ChevronRight
-                size={10}
-                className={cn('shrink-0 transition-transform', chatsOpen && 'rotate-90')}
-              />
-              Chats
-            </button>
-            {chatsOpen && (
+            {!isSidebarCollapsed ? (
+              <button
+                onClick={() => setChatsOpen(!chatsOpen)}
+                className="flex w-full items-center gap-1 px-2.5 py-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground"
+              >
+                <ChevronRight
+                  size={10}
+                  className={cn('shrink-0 transition-transform', chatsOpen && 'rotate-90')}
+                />
+                Chats
+              </button>
+            ) : null}
+            {(chatsOpen || isSidebarCollapsed) && (
               <div className="mt-0.5">
                 <Link
                   href="/chats"
-                  className="flex items-center gap-2 rounded-md px-2.5 py-[6px] text-[13px] text-sidebar-foreground transition-colors hover:bg-muted"
+                  title="Chat starten"
+                  className={cn(
+                    'flex items-center rounded-md py-[6px] text-[13px] text-sidebar-foreground transition-colors hover:bg-muted',
+                    isSidebarCollapsed ? 'justify-center px-2' : 'gap-2 px-2.5',
+                  )}
                 >
                   <MessageSquare size={14} className="shrink-0" />
-                  <span className="truncate">Chat starten</span>
+                  <span className={cn('truncate', isSidebarCollapsed && 'hidden')}>Chat starten</span>
                 </Link>
               </div>
             )}
@@ -302,17 +365,27 @@ export function AppShell({ children }: { children: React.ReactNode }): React.JSX
         <div className="border-t border-sidebar-border px-3 py-2">
           <Link
             href="/getting-started"
-            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-sidebar-foreground transition-colors hover:bg-muted"
+            title="Erste Schritte"
+            className={cn(
+              'flex items-center rounded-md px-2 py-1.5 text-[12px] text-sidebar-foreground transition-colors hover:bg-muted',
+              isSidebarCollapsed ? 'justify-center' : 'gap-2',
+            )}
           >
             <Settings size={14} className="shrink-0" />
-            <span>Erste Schritte</span>
-            <span className="ml-auto rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+            <span className={cn(isSidebarCollapsed && 'hidden')}>Erste Schritte</span>
+            <span className={cn('ml-auto rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground', isSidebarCollapsed && 'hidden')}>
               3/7
             </span>
           </Link>
-          <button className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-sidebar-foreground transition-colors hover:bg-muted">
+          <button
+            className={cn(
+              'flex w-full items-center rounded-md px-2 py-1.5 text-[12px] text-sidebar-foreground transition-colors hover:bg-muted',
+              isSidebarCollapsed ? 'justify-center' : 'gap-2',
+            )}
+            title="Teammitglieder einladen"
+          >
             <UserPlus size={14} className="shrink-0" />
-            <span>Teammitglieder einladen</span>
+            <span className={cn(isSidebarCollapsed && 'hidden')}>Teammitglieder einladen</span>
           </button>
           <button
             onClick={async () => {
@@ -320,16 +393,20 @@ export function AppShell({ children }: { children: React.ReactNode }): React.JSX
               await supabase.auth.signOut()
               router.push('/login')
             }}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-red-500 transition-colors hover:bg-red-50"
+            className={cn(
+              'flex w-full items-center rounded-md px-2 py-1.5 text-[12px] text-red-500 transition-colors hover:bg-red-50',
+              isSidebarCollapsed ? 'justify-center' : 'gap-2',
+            )}
+            title="Abmelden"
           >
             <LogOut size={14} className="shrink-0" />
-            <span>Abmelden</span>
+            <span className={cn(isSidebarCollapsed && 'hidden')}>Abmelden</span>
           </button>
         </div>
       </aside>
 
       {/* Hauptinhalt */}
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">{children}</div>
+      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">{children}</div>
 
       {/* Command Menu (⌘K) */}
       <CommandMenu

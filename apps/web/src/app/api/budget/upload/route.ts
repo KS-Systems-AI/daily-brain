@@ -2,7 +2,7 @@ import { createHash } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { prisma } from '@/lib/prisma'
-import { parseCSV } from '@/server/lib/budget/csv-parser'
+import { parseCSV, type ColumnMap } from '@/server/lib/budget/csv-parser'
 import { applyRules, detectTransfer } from '@/server/lib/budget/rule-engine'
 import { SEED_CATEGORIES, SEED_RULES } from '@/server/lib/budget/seed-data'
 
@@ -21,6 +21,29 @@ function computeImportHash(tx: {
     tx.iban ?? '',
   ].join('|')
   return createHash('sha256').update(key).digest('hex')
+}
+
+function parseColumnMap(raw: FormDataEntryValue | null): Partial<ColumnMap> | undefined {
+  if (typeof raw !== 'string' || !raw.trim()) return undefined
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const read = (key: keyof ColumnMap): string | null | undefined => {
+      const value = parsed[key]
+      return typeof value === 'string' && value.trim() ? value : null
+    }
+
+    return {
+      date: read('date'),
+      amount: read('amount'),
+      recipient: read('recipient'),
+      sender: read('sender'),
+      subject: read('subject'),
+      iban: read('iban'),
+    }
+  } catch {
+    return undefined
+  }
 }
 
 async function ensureSeedData(workspaceId: string): Promise<void> {
@@ -72,12 +95,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const formData = await request.formData()
   const file = formData.get('file') as File | null
   if (!file) return NextResponse.json({ error: 'Keine Datei übermittelt' }, { status: 400 })
+  const columnMapOverride = parseColumnMap(formData.get('mapping'))
 
   const csvText = await file.text()
-  const { transactions: parsed, errors } = parseCSV(csvText)
+  const { transactions: parsed, errors, headers, columnMap } = columnMapOverride
+    ? parseCSV(csvText, columnMapOverride)
+    : parseCSV(csvText)
 
   if (!parsed.length) {
-    return NextResponse.json({ error: 'Keine Buchungen erkannt', details: errors }, { status: 400 })
+    const needsMapping = headers.length > 0 && (!columnMap.date || !columnMap.amount)
+    return NextResponse.json(
+      {
+        error: needsMapping ? 'Spaltenzuordnung erforderlich' : 'Keine Buchungen erkannt',
+        details: errors,
+        needsMapping,
+        headers,
+        columnMap,
+      },
+      { status: needsMapping ? 422 : 400 },
+    )
   }
 
   await ensureSeedData(workspaceId)

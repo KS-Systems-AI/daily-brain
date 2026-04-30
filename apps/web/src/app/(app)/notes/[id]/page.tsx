@@ -2,6 +2,7 @@
 
 import { use } from 'react'
 import { NoteEditorPage } from '@/components/notes/note-editor-page'
+import { CraftNoteLayout } from '@/components/notes/craft-note-layout'
 
 export default function NoteDetailPage({
   params,
@@ -9,5 +10,9 @@ export default function NoteDetailPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = use(params)
-  return <NoteEditorPage noteId={id} />
+  return (
+    <CraftNoteLayout noteId={id}>
+      <NoteEditorPage noteId={id} />
+    </CraftNoteLayout>
+  )
 }
