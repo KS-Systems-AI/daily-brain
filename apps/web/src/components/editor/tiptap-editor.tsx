@@ -553,24 +553,6 @@ function BlockHandleRail({
               height: hoveredVisualRect.height,
             }}
           />
-          <div
-            className="absolute rounded-md border border-[#EF4444]"
-            style={{
-              top: editorMetrics.top + hoveredVisualRect.top,
-              left: editorMetrics.left + hoveredVisualRect.left,
-              width: hoveredVisualRect.width,
-              height: hoveredVisualRect.height,
-            }}
-          />
-          <div
-            className="absolute bg-[#EF4444]"
-            style={{
-              top: editorMetrics.top + hoveredVisualRect.top + hoveredVisualRect.height / 2 - 1,
-              left: editorMetrics.left + hoveredVisualRect.left,
-              width: hoveredVisualRect.width,
-              height: 2,
-            }}
-          />
         </div>
       ) : null}
 
@@ -831,6 +813,7 @@ function FormatRail({
                 <RailButton label="Fein" icon={Minus} onClick={() => insertBlock(createHorizontalRuleNode('solid'))} compact />
                 <RailButton label="Dick" icon={Grip} onClick={() => insertBlock(createHorizontalRuleNode('thick'))} compact />
                 <RailButton label="Gestr." icon={MoreHorizontal} onClick={() => insertBlock(createHorizontalRuleNode('dashed'))} compact />
+                <RailButton label="Punkte" icon={MoreHorizontal} onClick={() => insertBlock(createHorizontalRuleNode('dotted'))} compact />
               </div>
 
               <div className="my-3 h-px bg-[#EEF1F4]" />
