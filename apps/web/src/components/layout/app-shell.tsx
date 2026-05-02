@@ -29,6 +29,7 @@ import {
   Command,
   Wallet,
   PanelLeft,
+  Menu,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState, useMemo, useEffect } from 'react'
@@ -43,6 +44,7 @@ import { CommandMenu } from './command-menu'
 import { ContactFormSheet } from '@/components/contacts/contact-form-sheet'
 import { TaskFormDialog } from '@/components/tasks/task-form-dialog'
 import { VoiceNoteRecorder } from '@/components/voice/voice-note-recorder'
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 
 const mainNav = [
   { href: '/dashboard', label: 'Start', icon: Home },
@@ -91,6 +93,7 @@ export function AppShell({ children }: { children: React.ReactNode }): React.JSX
   const [contactDialogOpen, setContactDialogOpen] = useState(false)
   const [taskDialogOpen, setTaskDialogOpen] = useState(false)
   const [voiceNoteOpen, setVoiceNoteOpen] = useState(false)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const isSidebarCollapsed = sidebarCollapsed
 
   useEffect(() => {
@@ -109,7 +112,7 @@ export function AppShell({ children }: { children: React.ReactNode }): React.JSX
       {/* Sidebar */}
       <aside
         className={cn(
-          'flex shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-300 ease-out',
+          'hidden shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-300 ease-out md:flex',
           sidebarCollapsed
             ? 'w-[76px]'
             : 'w-[240px]',
@@ -406,7 +409,97 @@ export function AppShell({ children }: { children: React.ReactNode }): React.JSX
       </aside>
 
       {/* Hauptinhalt */}
-      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">{children}</div>
+      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="flex items-center justify-between border-b border-border px-3 py-2 md:hidden">
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(true)}
+            className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label="Navigation öffnen"
+          >
+            <Menu size={18} />
+          </button>
+          <div className="flex items-center gap-2">
+            <Image src="/logo.png" alt="Daily Brain" width={24} height={24} className="rounded-md" />
+            <span className="text-sm font-semibold text-foreground">Daily Brain</span>
+          </div>
+          <div className="w-9" />
+        </div>
+        {children}
+      </div>
+
+      <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+        <SheetContent side="left" className="w-[84vw] max-w-[320px] overflow-y-auto p-0">
+          <SheetHeader className="border-b border-border px-4 py-4">
+            <SheetTitle className="flex items-center gap-2 text-base">
+              <Image src="/logo.png" alt="Daily Brain" width={24} height={24} className="rounded-md" />
+              Daily Brain
+            </SheetTitle>
+          </SheetHeader>
+
+          <div className="px-3 py-3">
+            <div className="space-y-1">
+              {mainNav.map(({ href, label, icon: Icon }) => {
+                const active = pathname === href || (href !== '/dashboard' && pathname.startsWith(href))
+                return (
+                  <Link
+                    key={href}
+                    href={href}
+                    onClick={() => setMobileNavOpen(false)}
+                    className={cn(
+                      'flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors',
+                      active ? 'bg-accent font-medium text-foreground' : 'text-sidebar-foreground hover:bg-muted',
+                    )}
+                  >
+                    <Icon size={16} className="shrink-0" />
+                    <span>{label}</span>
+                  </Link>
+                )
+              })}
+            </div>
+
+            <div className="mt-5">
+              <p className="px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                Datensätze
+              </p>
+              <div className="mt-1 space-y-1">
+                {recordsNav.map(({ href, label, icon: Icon, color }) => {
+                  const active = pathname.startsWith(href)
+                  return (
+                    <Link
+                      key={href}
+                      href={href}
+                      onClick={() => setMobileNavOpen(false)}
+                      className={cn(
+                        'flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors',
+                        active ? 'bg-accent font-medium text-foreground' : 'text-sidebar-foreground hover:bg-muted',
+                      )}
+                    >
+                      <Icon size={16} className={cn('shrink-0', color)} />
+                      <span>{label}</span>
+                    </Link>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="mt-5 border-t border-border pt-3">
+              <button
+                onClick={async () => {
+                  const supabase = createClient()
+                  await supabase.auth.signOut()
+                  setMobileNavOpen(false)
+                  router.push('/login')
+                }}
+                className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-sm text-red-500 transition-colors hover:bg-red-50"
+              >
+                <LogOut size={16} className="shrink-0" />
+                <span>Abmelden</span>
+              </button>
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* Command Menu (⌘K) */}
       <CommandMenu
