@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { prisma } from '@/lib/prisma'
 import { parseCSV, type ColumnMap } from '@/server/lib/budget/csv-parser'
-import { applyRules, detectTransfer } from '@/server/lib/budget/rule-engine'
+import { applyRules, detectPairedTransfers, detectTransfer } from '@/server/lib/budget/rule-engine'
 import { SEED_CATEGORIES, SEED_RULES } from '@/server/lib/budget/seed-data'
 
 function computeImportHash(tx: {
@@ -36,6 +36,8 @@ function parseColumnMap(raw: FormDataEntryValue | null): Partial<ColumnMap> | un
     return {
       date: read('date'),
       amount: read('amount'),
+      debit: read('debit'),
+      credit: read('credit'),
       recipient: read('recipient'),
       sender: read('sender'),
       subject: read('subject'),
@@ -103,7 +105,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     : parseCSV(csvText)
 
   if (!parsed.length) {
-    const needsMapping = headers.length > 0 && (!columnMap.date || !columnMap.amount)
+    const hasAmountMapping = !!(columnMap.amount || columnMap.debit || columnMap.credit)
+    const needsMapping = headers.length > 0 && (!columnMap.date || !hasAmountMapping)
     return NextResponse.json(
       {
         error: needsMapping ? 'Spaltenzuordnung erforderlich' : 'Keine Buchungen erkannt',
@@ -122,22 +125,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     where: { workspace_id: workspaceId, deleted_at: null },
     include: { category: true },
   })
+  const transferCategoryId =
+    rules.find((rule) => rule.category.type === 'transfer')?.category_id ??
+    null
 
   const data = parsed.map((tx) => {
-    const isTransfer = detectTransfer({ recipient: tx.recipient, sender: tx.sender, subject: tx.subject })
-    let categoryId: string | null = null
-
-    if (!isTransfer) {
-      const cat = applyRules(
-        { recipient: tx.recipient, sender: tx.sender, subject: tx.subject },
-        rules,
-      )
-      if (cat) categoryId = cat.id
-    }
-
     return {
       workspace_id: workspaceId,
-      category_id: categoryId,
+      category_id: null as string | null,
       date: tx.date,
       amount: tx.amount,
       recipient: tx.recipient,
@@ -146,9 +141,43 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       iban: tx.iban,
       import_hash: computeImportHash({ date: tx.date, amount: tx.amount, recipient: tx.recipient, subject: tx.subject, iban: tx.iban }),
       raw_data: tx.rawData as object,
-      is_transfer: isTransfer,
+      is_transfer: false,
       source_file: file.name,
     }
+  })
+
+  const pairedTransfers = detectPairedTransfers(parsed)
+
+  data.forEach((row, index) => {
+    const tx = parsed[index]
+    let isTransfer = detectTransfer({
+      recipient: tx.recipient,
+      sender: tx.sender,
+      subject: tx.subject,
+      iban: tx.iban,
+    })
+    if (pairedTransfers.has(index)) {
+      isTransfer = true
+    }
+    let categoryId: string | null = isTransfer ? transferCategoryId : null
+
+    const cat = applyRules(
+      { recipient: tx.recipient, sender: tx.sender, subject: tx.subject, iban: tx.iban },
+      rules,
+    )
+
+    if (cat) {
+      categoryId = cat.id
+      if (cat.type === 'transfer') {
+        isTransfer = true
+      }
+    }
+
+    if (isTransfer && !categoryId) {
+      categoryId = transferCategoryId
+    }
+    row.is_transfer = isTransfer
+    row.category_id = categoryId
   })
 
   const before = await prisma.budgetTransaction.count({ where: { workspace_id: workspaceId, deleted_at: null } })

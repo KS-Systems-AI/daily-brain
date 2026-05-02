@@ -13,7 +13,7 @@ import {
 import { cn } from '@/lib/utils'
 import { trpc } from '@/lib/trpc/provider'
 
-type ColumnKey = 'date' | 'amount' | 'recipient' | 'sender' | 'subject' | 'iban'
+type ColumnKey = 'date' | 'amount' | 'debit' | 'credit' | 'recipient' | 'sender' | 'subject' | 'iban'
 type ColumnMap = Record<ColumnKey, null | string>
 
 type UploadResult = {
@@ -36,6 +36,8 @@ type UploadErrorResponse = {
 const EMPTY_COLUMN_MAP: ColumnMap = {
   date: null,
   amount: null,
+  debit: null,
+  credit: null,
   recipient: null,
   sender: null,
   subject: null,
@@ -121,8 +123,8 @@ export function CsvUpload({ onSuccess }: { onSuccess: () => void }): React.JSX.E
   }
 
   async function uploadWithMapping(): Promise<void> {
-    if (!pendingFile || !mapping.date || !mapping.amount) {
-      setError('Bitte ordne mindestens Datum und Betrag zu.')
+    if (!pendingFile || !mapping.date || (!mapping.amount && !mapping.debit && !mapping.credit)) {
+      setError('Bitte ordne mindestens Datum und Betrag oder Soll/Haben zu.')
       return
     }
     await upload(pendingFile, mapping)
@@ -213,10 +215,24 @@ export function CsvUpload({ onSuccess }: { onSuccess: () => void }): React.JSX.E
             />
             <MappingSelect
               label="Betrag"
-              required
               value={mapping.amount}
               headers={mappingHeaders}
               onChange={(value) => updateMapping('amount', value)}
+              hint="Reicht meistens alleine aus, wenn Einnahmen und Ausgaben in derselben Betragsspalte stehen."
+            />
+            <MappingSelect
+              label="Soll / Lastschrift"
+              value={mapping.debit}
+              headers={mappingHeaders}
+              onChange={(value) => updateMapping('debit', value)}
+              hint="Nur zuordnen, wenn deine CSV eine eigene Spalte für Abbuchungen hat. Nicht nötig, wenn 'Betrag' bereits positive und negative Werte enthält."
+            />
+            <MappingSelect
+              label="Haben / Gutschrift"
+              value={mapping.credit}
+              headers={mappingHeaders}
+              onChange={(value) => updateMapping('credit', value)}
+              hint="Nur zuordnen, wenn deine CSV eine eigene Spalte für Geldeingänge hat. Zusammen mit 'Soll / Lastschrift' als Alternative zur einzelnen Betragsspalte."
             />
             <MappingSelect
               label="Empfänger"
@@ -245,9 +261,16 @@ export function CsvUpload({ onSuccess }: { onSuccess: () => void }): React.JSX.E
           </div>
 
           <div className="flex items-center gap-2">
-            <Button size="sm" onClick={() => void uploadWithMapping()} disabled={uploading || !mapping.date || !mapping.amount}>
+            <Button
+              size="sm"
+              onClick={() => void uploadWithMapping()}
+              disabled={uploading || !mapping.date || (!mapping.amount && !mapping.debit && !mapping.credit)}
+            >
               CSV mit Zuordnung importieren
             </Button>
+            <span className="text-xs text-muted-foreground">
+              Betrag oder alternativ Soll/Haben reicht aus.
+            </span>
             <Button
               size="sm"
               variant="ghost"
@@ -269,12 +292,14 @@ export function CsvUpload({ onSuccess }: { onSuccess: () => void }): React.JSX.E
 
 function MappingSelect({
   headers,
+  hint,
   label,
   onChange,
   required = false,
   value,
 }: {
   headers: string[]
+  hint?: string
   label: string
   onChange: (value: string) => void
   required?: boolean
@@ -299,6 +324,11 @@ function MappingSelect({
           ))}
         </SelectContent>
       </Select>
+      {hint ? (
+        <span className="block text-[11px] leading-4 text-amber-900/80">
+          {hint}
+        </span>
+      ) : null}
     </label>
   )
 }

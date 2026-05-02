@@ -1,17 +1,15 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { format } from 'date-fns'
 import { de } from 'date-fns/locale'
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie,
-} from 'recharts'
 import type { inferRouterOutputs } from '@trpc/server'
 import type { AppRouter } from '@/server/routers/_app'
 
 type RouterOutputs = inferRouterOutputs<AppRouter>
 type Category = RouterOutputs['budget']['listCategories'][number]
-import { ChevronLeft, ChevronRight, Upload, ArrowLeftRight, TrendingDown, TrendingUp, Tag, X } from 'lucide-react'
+type Transaction = RouterOutputs['budget']['listTransactions'][number]
+import { ChevronLeft, ChevronRight, Upload, ArrowLeftRight, Tag } from 'lucide-react'
 import { trpc } from '@/lib/trpc/provider'
 import { CsvUpload } from '@/components/budget/csv-upload'
 import { TransactionRow } from '@/components/budget/transaction-row'
@@ -28,8 +26,83 @@ function formatCents(cents: number): string {
   return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(cents / 100)
 }
 
+const BILLING_INTERVAL_LABELS: Record<string, string> = {
+  monthly: 'monatlich',
+  quarterly: 'vierteljährlich',
+  biannual: 'halbjährlich',
+  annual: 'jährlich',
+}
+
 
 type Tab = 'dashboard' | 'transactions' | 'transfers' | 'categories'
+
+const OVERVIEW_REFRESH_MS = 10_000
+type TransferListItem =
+  | { kind: 'pair'; key: string; outgoing: Transaction; incoming: Transaction }
+  | { kind: 'single'; key: string; transaction: Transaction }
+
+function normalizeName(value: string | null | undefined): string | null {
+  if (!value) return null
+  return value.trim().toUpperCase().replace(/\s+/g, ' ')
+}
+
+function isSameDay(a: string | Date, b: string | Date): boolean {
+  const left = new Date(a)
+  const right = new Date(b)
+  return left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+}
+
+function buildTransferList(transactions: Transaction[]): TransferListItem[] {
+  const used = new Set<string>()
+  const items: TransferListItem[] = []
+
+  for (const tx of transactions) {
+    if (used.has(tx.id)) continue
+
+    const pair = transactions.find((candidate) => {
+      if (candidate.id === tx.id || used.has(candidate.id)) return false
+      if (!isSameDay(tx.date, candidate.date)) return false
+      if (tx.amount !== -candidate.amount) return false
+
+      const txRecipient = normalizeName(tx.recipient)
+      const txSender = normalizeName(tx.sender)
+      const candidateRecipient = normalizeName(candidate.recipient)
+      const candidateSender = normalizeName(candidate.sender)
+
+      return !!(
+        txRecipient &&
+        txSender &&
+        candidateRecipient &&
+        candidateSender &&
+        txRecipient === candidateSender &&
+        txSender === candidateRecipient
+      )
+    })
+
+    if (pair) {
+      used.add(tx.id)
+      used.add(pair.id)
+
+      const outgoing = tx.amount < 0 ? tx : pair
+      const incoming = tx.amount >= 0 ? tx : pair
+
+      items.push({
+        kind: 'pair',
+        key: `${outgoing.id}-${incoming.id}`,
+        outgoing,
+        incoming,
+      })
+      continue
+    }
+
+    used.add(tx.id)
+    items.push({ kind: 'single', key: tx.id, transaction: tx })
+  }
+
+  return items
+}
 
 export default function BudgetPage(): React.JSX.Element {
   const now = new Date()
@@ -37,7 +110,17 @@ export default function BudgetPage(): React.JSX.Element {
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [tab, setTab] = useState<Tab>('dashboard')
   const [showUpload, setShowUpload] = useState(false)
-  const [selectedCategory, setSelectedCategory] = useState<{ id: string; name: string; color: string } | null>(null)
+  const [selectedFixedCostKey, setSelectedFixedCostKey] = useState<string | null>(null)
+  const [fixedCostLabelDraft, setFixedCostLabelDraft] = useState('')
+  const [fixedCostIntervalDraft, setFixedCostIntervalDraft] = useState<'monthly' | 'quarterly' | 'biannual' | 'annual'>('monthly')
+  const [mergeTargetKey, setMergeTargetKey] = useState<string>('')
+  const [selectedCategory, setSelectedCategory] = useState<{
+    id: string
+    name: string
+    color: string
+    year: number
+    monthNumber: number
+  } | null>(null)
 
   function prevMonth(): void {
     if (month === 1) { setMonth(12); setYear((y) => y - 1) }
@@ -48,25 +131,78 @@ export default function BudgetPage(): React.JSX.Element {
     else setMonth((m) => m + 1)
   }
 
-  const { data: stats, isLoading: statsLoading } = trpc.budget.dashboardStats.useQuery({ year, month })
-  const { data: monthly } = trpc.budget.monthlyOverview.useQuery({ months: 12 })
+  const overviewQueryOptions = {
+    refetchInterval: tab === 'dashboard' ? OVERVIEW_REFRESH_MS : false,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+  } as const
+
+  const { data: stats, isLoading: statsLoading } = trpc.budget.dashboardStats.useQuery(
+    { year, month },
+    overviewQueryOptions,
+  )
+  const { data: monthlyCategories } = trpc.budget.monthlyCategoryOverview.useQuery(
+    { months: 12 },
+    overviewQueryOptions,
+  )
+  const { data: fixedCostOverview } = trpc.budget.fixedCostOverview.useQuery(
+    undefined,
+    overviewQueryOptions,
+  )
   const { data: transactions = [], isLoading: txLoading } = trpc.budget.listTransactions.useQuery({
     year, month,
     includeTransfers: tab === 'transfers',
   })
   const { data: categories = [] } = trpc.budget.listCategories.useQuery()
+  const { data: rules = [] } = trpc.budget.listRules.useQuery()
+  const { data: fixedCostDetails } = trpc.budget.getFixedCostGroupDetails.useQuery(
+    { groupKey: selectedFixedCostKey ?? '' },
+    { enabled: !!selectedFixedCostKey }
+  )
   const { data: categoryTxs = [], isLoading: categoryTxsLoading } = trpc.budget.listTransactions.useQuery(
-    { year, month, categoryId: selectedCategory?.id, includeTransfers: false },
+    {
+      year: selectedCategory?.year ?? year,
+      month: selectedCategory?.monthNumber ?? month,
+      categoryId: selectedCategory?.id,
+      includeTransfers: false,
+    },
     { enabled: !!selectedCategory }
   )
-
-  const currentMonthLabel = format(new Date(year, month - 1, 1), 'MMMM yyyy', { locale: de })
 
   const isCurrentOrFuture = year > now.getFullYear() || (year === now.getFullYear() && month >= now.getMonth() + 1)
 
   const filteredTransactions = tab === 'transfers'
     ? transactions.filter((t) => t.is_transfer)
     : transactions.filter((t) => !t.is_transfer)
+  const transferItems = tab === 'transfers' ? buildTransferList(filteredTransactions) : []
+  const utils = trpc.useUtils()
+  const updateFixedCostGroup = trpc.budget.updateFixedCostGroup.useMutation({
+    onSuccess: async () => {
+      await Promise.all([
+        utils.budget.fixedCostOverview.invalidate(),
+        utils.budget.getFixedCostGroupDetails.invalidate(),
+        utils.budget.listTransactions.invalidate(),
+        utils.budget.dashboardStats.invalidate(),
+      ])
+    },
+  })
+  const splitFixedCostTransaction = trpc.budget.splitFixedCostTransaction.useMutation({
+    onSuccess: async () => {
+      await Promise.all([
+        utils.budget.fixedCostOverview.invalidate(),
+        utils.budget.getFixedCostGroupDetails.invalidate(),
+        utils.budget.listTransactions.invalidate(),
+        utils.budget.dashboardStats.invalidate(),
+      ])
+    },
+  })
+
+  useEffect(() => {
+    if (!fixedCostDetails) return
+    setFixedCostLabelDraft(fixedCostDetails.label)
+    setFixedCostIntervalDraft(fixedCostDetails.billingInterval as 'monthly' | 'quarterly' | 'biannual' | 'annual')
+    setMergeTargetKey(fixedCostDetails.siblingGroups[0]?.groupKey ?? '')
+  }, [fixedCostDetails])
 
   const TABS: { key: Tab; label: string }[] = [
     { key: 'dashboard', label: 'Übersicht' },
@@ -76,22 +212,36 @@ export default function BudgetPage(): React.JSX.Element {
   ]
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border px-6 py-4">
-        <div className="flex items-center gap-4">
-          <h1 className="text-lg font-semibold">Haushaltsbuch</h1>
-          <div className="flex items-center gap-1">
-            <button onClick={prevMonth} className="rounded p-1 hover:bg-muted">
-              <ChevronLeft size={16} />
-            </button>
-            <span className="min-w-[140px] text-center text-sm font-medium">{currentMonthLabel}</span>
-            <button onClick={nextMonth} disabled={isCurrentOrFuture} className="rounded p-1 hover:bg-muted disabled:opacity-40">
-              <ChevronRight size={16} />
-            </button>
-          </div>
+      <div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:px-6 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-4">
+          <h1 className="text-lg font-semibold sm:text-xl">Haushaltsbuch</h1>
+          {(tab === 'transactions' || tab === 'transfers') && (
+            <div className="flex items-center gap-1 self-start rounded-full border border-border bg-background p-1">
+              <button type="button" onClick={prevMonth} className="rounded-full p-1.5 hover:bg-muted">
+                <ChevronLeft size={16} />
+              </button>
+              <span className="min-w-[132px] px-1 text-center text-sm font-medium sm:min-w-[148px]">
+                {format(new Date(year, month - 1, 1), 'MMMM yyyy', { locale: de })}
+              </span>
+              <button
+                type="button"
+                onClick={nextMonth}
+                disabled={isCurrentOrFuture}
+                className="rounded-full p-1.5 hover:bg-muted disabled:opacity-40"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          )}
         </div>
-        <Button size="sm" variant="outline" onClick={() => setShowUpload((v) => !v)}>
+        <Button
+          size="sm"
+          variant="outline"
+          className="w-full md:w-auto"
+          onClick={() => setShowUpload((v) => !v)}
+        >
           <Upload size={14} className="mr-1.5" />
           CSV importieren
         </Button>
@@ -99,182 +249,195 @@ export default function BudgetPage(): React.JSX.Element {
 
       {/* Upload panel */}
       {showUpload && (
-        <div className="border-b border-border bg-muted/30 px-6 py-4">
+        <div className="border-b border-border bg-muted/30 px-4 py-4 sm:px-6">
           <CsvUpload onSuccess={() => setShowUpload(false)} />
         </div>
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 border-b border-border px-6">
-        {TABS.map(({ key, label }) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className={cn(
-              '-mb-px border-b-2 px-3 py-2.5 text-sm transition-colors',
-              tab === key
-                ? 'border-primary font-medium text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="border-b border-border px-4 sm:px-6">
+        <div className="flex gap-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {TABS.map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className={cn(
+                '-mb-px shrink-0 border-b-2 px-3 py-2.5 text-sm transition-colors',
+                tab === key
+                  ? 'border-primary font-medium text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6">
         {tab === 'dashboard' && (
           <div className="space-y-6">
-            {/* Summary cards */}
-            {statsLoading ? (
-              <div className="grid grid-cols-4 gap-4">
-                {[0, 1, 2, 3].map((i) => (
-                  <div key={i} className="h-24 animate-pulse rounded-xl bg-muted" />
-                ))}
-              </div>
-            ) : stats ? (
-              <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-                <StatCard label="Einnahmen" value={formatCents(stats.totalIncome)} icon={<TrendingUp size={16} />} color="text-green-600" />
-                <StatCard label="Ausgaben gesamt" value={formatCents(stats.totalExpenses)} icon={<TrendingDown size={16} />} color="text-red-500" />
-                <StatCard
-                  label="Fixkosten"
-                  value={formatCents(stats.fixedExpensesNormalized)}
-                  icon={<Tag size={16} />}
-                  color="text-violet-500"
-                  note={stats.fixedExpensesNormalized !== stats.fixedExpenses ? 'Ø/Monat' : undefined}
-                />
-                <StatCard label="Variable Ausgaben" value={formatCents(stats.variableExpenses)} icon={<Tag size={16} />} color="text-orange-500" />
-              </div>
-            ) : null}
-
-            {/* Charts row */}
-            <div className="grid grid-cols-5 gap-4">
-              {/* Monthly bar chart */}
-              <div className="col-span-3 rounded-xl border border-border bg-card p-4">
-                <h2 className="mb-4 text-sm font-semibold">12-Monats-Verlauf</h2>
-                {monthly?.length ? (
-                  <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={monthly} barSize={12} barGap={2}>
-                      <XAxis dataKey="month" tick={{ fontSize: 11 }} tickFormatter={(v) => {
-                        const [y, m] = (v as string).split('-')
-                        return format(new Date(parseInt(y), parseInt(m) - 1), 'MMM', { locale: de })
-                      }} />
-                      <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${Math.round((v as number) / 100)}€`} />
-                      <Tooltip
-                        formatter={(v: unknown) => formatCents(Number(v))}
-                        labelFormatter={(v) => {
-                          const [y, m] = (v as string).split('-')
-                          return format(new Date(parseInt(y), parseInt(m) - 1), 'MMMM yyyy', { locale: de })
-                        }}
-                      />
-                      <Bar dataKey="fixed" name="Fixkosten" fill="#6366f1" radius={[2, 2, 0, 0]} stackId="a" />
-                      <Bar dataKey="variable" name="Variabel" fill="#f97316" radius={[2, 2, 0, 0]} stackId="a" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <EmptyChart />
-                )}
-              </div>
-
-              {/* Category donut */}
-              <div className="col-span-2 rounded-xl border border-border bg-card p-4">
-                <h2 className="mb-4 text-sm font-semibold">Nach Kategorie</h2>
-                {stats?.byCategory.length ? (
-                  <ResponsiveContainer width="100%" height={220}>
-                    <PieChart>
-                      <Pie
-                        data={stats.byCategory.slice(0, 8)}
-                        dataKey="total"
-                        nameKey="name"
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={50}
-                        outerRadius={80}
-                        paddingAngle={2}
-                      >
-                        {stats.byCategory.slice(0, 8).map((entry) => (
-                          <Cell key={entry.id} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip formatter={(v: unknown) => formatCents(Number(v))} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <EmptyChart />
-                )}
-              </div>
-            </div>
-
-            {/* Category breakdown list */}
-            {stats?.byCategory.length ? (
-              <div className="rounded-xl border border-border bg-card">
-                <div className="border-b border-border px-4 py-3">
-                  <h2 className="text-sm font-semibold">Kategorie-Aufschlüsselung</h2>
+            {fixedCostOverview?.items.length ? (
+              <div className="rounded-xl border border-border bg-card p-4 sm:p-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h2 className="text-sm font-semibold">Fixkosten pro Monat</h2>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Dauerhafte Monatslast auf Basis deiner gespeicherten Fixkostenbuchungen.
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs text-muted-foreground">Gesamt</p>
+                    <p className="text-xl font-semibold tabular-nums">
+                      {formatCents(fixedCostOverview.totalMonthly)}
+                    </p>
+                  </div>
                 </div>
-                {(
-                  [
-                    { type: 'income',   label: 'Einnahmen',         base: stats.totalIncome,   color: 'text-green-600' },
-                    { type: 'fixed',    label: 'Fixkosten',          base: stats.totalExpenses, color: 'text-violet-500' },
-                    { type: 'variable', label: 'Variable Ausgaben',  base: stats.totalExpenses, color: 'text-orange-500' },
-                  ] as const
-                ).map(({ type, label, base, color }) => {
-                  const cats = stats.byCategory.filter((c) => c.type === type)
-                  if (!cats.length) return null
-                  return (
-                    <div key={type}>
-                      <div className="flex items-center justify-between border-b border-border/50 bg-muted/30 px-4 py-1.5">
-                        <span className={cn('text-xs font-semibold uppercase tracking-wider', color)}>{label}</span>
-                        <span className={cn('text-xs font-semibold tabular-nums', color)}>
-                          {type === 'income' ? '+' : ''}{formatCents(cats.reduce((s, c) => s + c.total, 0))}
-                        </span>
+                <div className="mt-4 max-h-[32rem] overflow-y-auto pr-1">
+                  <div className="divide-y divide-border/50">
+                    {fixedCostOverview.items.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => setSelectedFixedCostKey(item.key)}
+                      className="flex w-full flex-col gap-3 rounded-lg py-3 text-left transition-colors hover:bg-muted/40 sm:flex-row sm:items-center"
+                    >
+                      <div className="flex min-w-0 flex-1 items-start gap-3">
+                        <span
+                          className="mt-1 size-2.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: item.categoryColor }}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">{item.label}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {item.categoryName} · {BILLING_INTERVAL_LABELS[item.billingInterval] ?? item.billingInterval} · zuletzt{' '}
+                            {format(new Date(item.lastBookedAt), 'MMM yyyy', { locale: de })}
+                          </p>
+                        </div>
                       </div>
-                      <div className="divide-y divide-border/50">
-                        {cats.map((cat) => {
-                          const pct = base > 0 ? (cat.total / base) * 100 : 0
-                          return (
+                      <div className="w-full text-left sm:w-auto sm:text-right">
+                        <p className="text-sm font-semibold tabular-nums">
+                          {formatCents(item.monthlyAmount)}
+                        </p>
+                        {item.lastAmount !== item.monthlyAmount && (
+                          <p className="text-[10px] text-muted-foreground">
+                            von {formatCents(item.lastAmount)}
+                          </p>
+                        )}
+                      </div>
+                    </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-col gap-1 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+                  <p>
+                    Klick auf einen Eintrag, um Abo-Name, Intervall oder Zusammenführung direkt zu bearbeiten.
+                  </p>
+                  {fixedCostOverview.items.length > 8 ? (
+                    <p>Nach unten scrollen für weitere Fixkosten.</p>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-border bg-card/60 p-5">
+                <h2 className="text-sm font-semibold">Fixkosten pro Monat</h2>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Noch keine Fixkosten erkannt. Sobald du wiederkehrende Buchungen als monatlich, vierteljährlich, halbjährlich oder jährlich markierst, erscheint hier deine echte Monatslast.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-4 w-full sm:w-auto"
+                  onClick={() => setTab('transactions')}
+                >
+                  Buchungen kategorisieren
+                </Button>
+              </div>
+            )}
+
+            {monthlyCategories?.length ? (
+              <div className="rounded-xl border border-border bg-card p-4 sm:p-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h2 className="text-sm font-semibold">Monate im Überblick</h2>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Variable Kosten pro Monat auf einer Seite. Klick auf eine Kategorie zeigt die einzelnen Buchungen.
+                    </p>
+                  </div>
+                  <p className="text-xs text-muted-foreground">letzte 12 Monate</p>
+                </div>
+                <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                  {monthlyCategories.map((monthEntry) => (
+                    <div key={monthEntry.month} className="rounded-xl border border-border/70 bg-background/60 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <h3 className="text-sm font-semibold">
+                            {format(new Date(monthEntry.year, monthEntry.monthNumber - 1, 1), 'MMMM yyyy', { locale: de })}
+                          </h3>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Variable Kosten gesamt: {formatCents(monthEntry.variableTotal)}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {monthEntry.variableCategories.length > 0 ? (
+                          monthEntry.variableCategories.map((category) => (
                             <button
-                              key={cat.id}
-                              onClick={() => setSelectedCategory({ id: cat.id, name: cat.name, color: cat.color })}
-                              className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted/50"
+                              key={`${monthEntry.month}-${category.id}`}
+                              onClick={() => setSelectedCategory({
+                                id: category.id,
+                                name: category.name,
+                                color: category.color,
+                                year: monthEntry.year,
+                                monthNumber: monthEntry.monthNumber,
+                              })}
+                              className="rounded-full px-3 py-1.5 text-xs font-medium transition-opacity hover:opacity-80"
+                              style={{
+                                backgroundColor: `${category.color}20`,
+                                color: category.color,
+                              }}
                             >
-                              <div className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: cat.color }} />
-                              <span className="flex-1 text-sm">{cat.name}</span>
-                              <div className="flex items-center gap-3">
-                                <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
-                                  <div className="h-full rounded-full" style={{ width: `${Math.min(pct, 100)}%`, backgroundColor: cat.color }} />
-                                </div>
-                                <span className="w-8 text-right text-xs text-muted-foreground">{Math.round(pct)}%</span>
-                                <div className="w-28 text-right">
-                                  <span className={cn(
-                                    'text-sm font-medium tabular-nums',
-                                    type === 'income' ? 'text-green-600' : 'text-foreground',
-                                  )}>
-                                    {type === 'income' ? '+' : ''}{formatCents(cat.total)}
-                                  </span>
-                                  {cat.type === 'fixed' && cat.actualTotal !== cat.total && (
-                                    <p className="text-[10px] text-muted-foreground">
-                                      von {formatCents(cat.actualTotal)}
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
+                              {category.name} · {formatCents(category.total)}
                             </button>
-                          )
-                        })}
+                          ))
+                        ) : (
+                          <p className="text-xs text-muted-foreground">
+                            Keine variablen Kategorien in diesem Monat.
+                          </p>
+                        )}
                       </div>
                     </div>
-                  )
-                })}
+                  ))}
+                </div>
               </div>
-            ) : null}
+            ) : (
+              <div className="rounded-xl border border-dashed border-border bg-card/60 p-5">
+                <h2 className="text-sm font-semibold">Monate im Überblick</h2>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Noch keine variable Monatsübersicht vorhanden. Nach dem Import und der Kategorisierung werden hier deine Ausgaben je Monat und Kategorie sichtbar.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-4 w-full sm:w-auto"
+                  onClick={() => setShowUpload(true)}
+                >
+                  CSV importieren
+                </Button>
+              </div>
+            )}
 
-            {/* Uncategorized warning */}
             {stats?.uncategorized && stats.uncategorized > 0 ? (
-              <div className="flex items-center gap-2 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                <Tag size={14} />
-                <span><strong>{stats.uncategorized}</strong> Buchungen ohne Kategorie — im Tab &quot;Buchungen&quot; manuell zuweisen</span>
-                <button onClick={() => setTab('transactions')} className="ml-auto text-amber-700 underline">Jetzt kategorisieren</button>
+              <div className="flex flex-col gap-2 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800 sm:flex-row sm:items-center">
+                <div className="flex items-center gap-2">
+                  <Tag size={14} />
+                  <span><strong>{stats.uncategorized}</strong> Buchungen ohne Kategorie — im Tab &quot;Buchungen&quot; manuell zuweisen</span>
+                </div>
+                <button onClick={() => setTab('transactions')} className="text-left text-amber-700 underline sm:ml-auto">
+                  Jetzt kategorisieren
+                </button>
               </div>
             ) : null}
           </div>
@@ -293,6 +456,14 @@ export default function BudgetPage(): React.JSX.Element {
                 <ArrowLeftRight size={32} className="opacity-30" />
                 <p className="text-sm">Keine Buchungen für diesen Monat</p>
               </div>
+            ) : tab === 'transfers' ? (
+              <div className="divide-y divide-border/50 p-2">
+                {transferItems.map((item) => (
+                  item.kind === 'pair'
+                    ? <TransferPairRow key={item.key} outgoing={item.outgoing} incoming={item.incoming} />
+                    : <TransactionRow key={item.key} transaction={item.transaction} categories={categories} />
+                ))}
+              </div>
             ) : (
               <div className="divide-y divide-border/50 p-2">
                 {filteredTransactions.map((tx) => (
@@ -304,13 +475,13 @@ export default function BudgetPage(): React.JSX.Element {
         )}
 
         {tab === 'categories' && (
-          <CategoriesTab categories={categories as Category[]} />
+          <CategoriesTab categories={categories as Category[]} rules={rules} />
         )}
       </div>
 
       {/* Category detail dialog */}
       <Dialog open={!!selectedCategory} onOpenChange={(open) => { if (!open) setSelectedCategory(null) }}>
-        <DialogContent className="sm:max-w-xl">
+        <DialogContent className="max-h-[85vh] overflow-hidden sm:max-w-xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 pr-6">
               {selectedCategory && (
@@ -319,7 +490,9 @@ export default function BudgetPage(): React.JSX.Element {
               {selectedCategory?.name}
             </DialogTitle>
             <p className="text-xs text-muted-foreground">
-              {format(new Date(year, month - 1, 1), 'MMMM yyyy', { locale: de })}
+              {selectedCategory
+                ? format(new Date(selectedCategory.year, selectedCategory.monthNumber - 1, 1), 'MMMM yyyy', { locale: de })
+                : format(new Date(year, month - 1, 1), 'MMMM yyyy', { locale: de })}
             </p>
           </DialogHeader>
           <div className="max-h-[60vh] overflow-y-auto">
@@ -366,43 +539,185 @@ export default function BudgetPage(): React.JSX.Element {
           )}
         </DialogContent>
       </Dialog>
+
+      <Dialog
+        open={!!selectedFixedCostKey}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedFixedCostKey(null)
+          }
+        }}
+      >
+        <DialogContent className="max-h-[88vh] overflow-hidden sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Fixkosten bearbeiten</DialogTitle>
+          </DialogHeader>
+
+          {fixedCostDetails ? (
+            <div className="space-y-5 overflow-y-auto pr-1">
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="space-y-2">
+                  <span className="text-sm font-medium">Abo-Name</span>
+                  <input
+                    value={fixedCostLabelDraft}
+                    onChange={(e) => setFixedCostLabelDraft(e.target.value)}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                  />
+                </label>
+
+                <label className="space-y-2">
+                  <span className="text-sm font-medium">Intervall</span>
+                  <select
+                    value={fixedCostIntervalDraft}
+                    onChange={(e) => setFixedCostIntervalDraft(e.target.value as 'monthly' | 'quarterly' | 'biannual' | 'annual')}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="monthly">Monatlich</option>
+                    <option value="quarterly">Vierteljährlich</option>
+                    <option value="biannual">Halbjährlich</option>
+                    <option value="annual">Jährlich</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/30 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-medium">Aktuelle Monatslast</p>
+                  <p className="text-xs text-muted-foreground">
+                    Zuletzt gebucht {format(new Date(fixedCostDetails.transactions[0]?.date ?? new Date()), 'MMM yyyy', { locale: de })}
+                  </p>
+                </div>
+                <p className="text-lg font-semibold tabular-nums">{formatCents(fixedCostDetails.monthlyAmount)}</p>
+              </div>
+
+              <div className="flex items-center justify-end">
+                <Button
+                  onClick={() => updateFixedCostGroup.mutate({
+                    groupKey: fixedCostDetails.groupKey,
+                    label: fixedCostLabelDraft.trim(),
+                    billingInterval: fixedCostIntervalDraft,
+                  })}
+                  disabled={updateFixedCostGroup.isPending || !fixedCostLabelDraft.trim()}
+                >
+                  Änderungen speichern
+                </Button>
+              </div>
+
+              {fixedCostDetails.siblingGroups.length > 0 ? (
+                <div className="space-y-3 rounded-lg border border-border p-4">
+                  <div>
+                    <h3 className="text-sm font-medium">Mit anderem Abo zusammenführen</h3>
+                    <p className="text-xs text-muted-foreground">
+                      Nützlich, wenn zwei Einträge doch dasselbe Abo oder derselbe Vertrag sind.
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <select
+                      value={mergeTargetKey}
+                      onChange={(e) => setMergeTargetKey(e.target.value)}
+                      className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm"
+                    >
+                      {fixedCostDetails.siblingGroups.map((group) => (
+                        <option key={group.groupKey} value={group.groupKey}>
+                          {group.label} · {formatCents(group.monthlyAmount)} · {BILLING_INTERVAL_LABELS[group.billingInterval] ?? group.billingInterval}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        const target = fixedCostDetails.siblingGroups.find((group) => group.groupKey === mergeTargetKey)
+                        if (!target) return
+                        updateFixedCostGroup.mutate({
+                          groupKey: fixedCostDetails.groupKey,
+                          mergeIntoGroupKey: target.groupKey,
+                          mergeIntoLabel: target.label,
+                        })
+                      }}
+                      disabled={updateFixedCostGroup.isPending || !mergeTargetKey}
+                    >
+                      Zusammenführen
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="space-y-3">
+                <div>
+                  <h3 className="text-sm font-medium">Zugehörige Buchungen</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Einzelne Buchungen kannst du bei Bedarf als eigenes Abo abspalten.
+                  </p>
+                </div>
+                <div className="max-h-[260px] space-y-2 overflow-y-auto">
+                  {fixedCostDetails.transactions.map((tx) => (
+                    <div key={tx.id} className="flex items-center gap-3 rounded-lg border border-border px-3 py-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium">
+                          {format(new Date(tx.date), 'd. MMM yyyy', { locale: de })} · {formatCents(tx.amount)}
+                        </p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {tx.recipient ?? tx.subject ?? 'Buchung'}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => splitFixedCostTransaction.mutate({
+                          transactionId: tx.id,
+                          label: `${fixedCostLabelDraft || fixedCostDetails.label} separat`,
+                        })}
+                        disabled={splitFixedCostTransaction.isPending}
+                      >
+                        Eigenes Abo
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="py-6 text-sm text-muted-foreground">Fixkosten werden geladen…</div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
 
-function StatCard({
-  label,
-  value,
-  icon,
-  color,
-  note,
+function TransferPairRow({
+  outgoing,
+  incoming,
 }: {
-  label: string
-  value: string
-  icon: React.ReactNode
-  color: string
-  note?: string
+  outgoing: Transaction
+  incoming: Transaction
 }): React.JSX.Element {
-  return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <div className={cn('mb-2 flex items-center gap-1.5 text-xs font-medium', color)}>
-        {icon}
-        {label}
-        {note && (
-          <span className="ml-auto rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
-            {note}
-          </span>
-        )}
-      </div>
-      <p className="text-2xl font-bold tabular-nums">{value}</p>
-    </div>
-  )
-}
+  const fromLabel = outgoing.sender ?? outgoing.recipient ?? 'Unbekannt'
+  const toLabel = outgoing.recipient ?? incoming.recipient ?? 'Unbekannt'
 
-function EmptyChart(): React.JSX.Element {
   return (
-    <div className="flex h-[220px] items-center justify-center text-sm text-muted-foreground">
-      Noch keine Daten — CSV importieren
+    <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 px-4 py-3">
+      <div className="flex items-start gap-3">
+        <span className="w-16 shrink-0 pt-0.5 text-xs text-muted-foreground">
+          {format(new Date(outgoing.date), 'd. MMM', { locale: de })}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-medium">
+              {fromLabel} <span className="text-muted-foreground">→</span> {toLabel}
+            </p>
+            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+              Umbuchung
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Abgang {formatCents(outgoing.amount)} · Eingang {formatCents(incoming.amount)}
+          </p>
+        </div>
+        <span className="text-sm font-semibold text-emerald-700">
+          {formatCents(incoming.amount)}
+        </span>
+      </div>
     </div>
   )
 }
@@ -481,7 +796,13 @@ function CategoryRow({ cat }: { cat: Category }): React.JSX.Element {
   )
 }
 
-function CategoriesTab({ categories }: { categories: Category[] }): React.JSX.Element {
+function CategoriesTab({
+  categories,
+  rules,
+}: {
+  categories: Category[]
+  rules: RouterOutputs['budget']['listRules']
+}): React.JSX.Element {
   const utils = trpc.useUtils()
   const [newName, setNewName] = useState('')
   const [newType, setNewType] = useState<'fixed' | 'variable' | 'income' | 'transfer'>('variable')
@@ -491,6 +812,9 @@ function CategoriesTab({ categories }: { categories: Category[] }): React.JSX.El
       void utils.budget.listCategories.invalidate()
       setNewName('')
     },
+  })
+  const deleteRule = trpc.budget.deleteRule.useMutation({
+    onSuccess: () => void utils.budget.listRules.invalidate(),
   })
 
   const groups: Record<string, Category[]> = {
@@ -512,7 +836,7 @@ function CategoriesTab({ categories }: { categories: Category[] }): React.JSX.El
       <div className="rounded-xl border border-border bg-card p-4">
         <h2 className="mb-3 text-sm font-semibold">Neue Kategorie</h2>
         <form
-          className="flex gap-2"
+          className="flex flex-col gap-2 sm:flex-row"
           onSubmit={(e) => {
             e.preventDefault()
             if (!newName.trim()) return
@@ -551,6 +875,51 @@ function CategoriesTab({ categories }: { categories: Category[] }): React.JSX.El
           </div>
         </div>
       ))}
+
+      <div className="rounded-xl border border-border bg-card">
+        <div className="border-b border-border px-4 py-3">
+          <h2 className="text-sm font-semibold">Gespeicherte Regeln</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Manuell gelernte Zuordnungen für künftige CSV-Imports.
+          </p>
+        </div>
+        {rules.length === 0 ? (
+          <div className="px-4 py-6 text-sm text-muted-foreground">
+            Noch keine eigenen Regeln gespeichert.
+          </div>
+        ) : (
+          <div className="divide-y divide-border/50">
+            {rules.map((rule) => (
+              <div key={rule.id} className="flex items-center gap-3 px-4 py-3 text-sm">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-medium">{rule.match_value}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {rule.match_field} · {rule.match_type}
+                  </p>
+                </div>
+                <span
+                  className="rounded-full px-2.5 py-1 text-xs font-medium"
+                  style={{
+                    backgroundColor: `${rule.category.color ?? '#94a3b8'}20`,
+                    color: rule.category.color ?? '#94a3b8',
+                  }}
+                >
+                  {rule.category.name}
+                </span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-xs text-muted-foreground"
+                  onClick={() => deleteRule.mutate({ id: rule.id })}
+                  disabled={deleteRule.isPending}
+                >
+                  Löschen
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
